@@ -288,20 +288,6 @@ The script will automatically run your custom scripts whenever port 1234 is foun
 
 ### v1.0
 - Initial release with 40 service mappings
-
----
-
-## Tips for CPTS
-
-- Run with `--skip-udp --skip-vuln` for a fast first pass to identify the attack surface
-- Run the full scan in the background while manually investigating interesting ports
-- All output is saved to files — paste directly into your Obsidian machine template
-- The summary report flags interesting findings in real time — check those first
-- For Active Directory targets make sure ports 88, 389, 445, 3268, and 5985 are in scope
-- IPMI on UDP 623 is commonly missed — cipher zero vulnerability gives plaintext credentials
-- distcc on port 3632 — script actively exploits RCE if vulnerable
-- JDWP on port 5005 — script injects and executes Java bytecode for RCE
-
 ---
 
 ## Disclaimer
