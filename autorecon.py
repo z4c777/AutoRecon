@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# This tool was generted with AI
+#This tool was generated with AI
 """
 AutoRecon — Automated Nmap Enumeration Script
-For authorized penetration testing only (HackTheBox, CPTS, etc.)
+For CTFs (HackTheBox, CPTS, etc.)
 
 Usage:
     python3 autorecon.py -t TARGET_IP
@@ -41,259 +41,734 @@ RESET   = "\033[0m"
 #  Maps port numbers to nmap scripts to run
 # ══════════════════════════════════════════════════════════
 SERVICE_SCRIPTS = {
-    # FTP
+    # ── FTP ──────────────────────────────────────────────
     21: {
         "name": "FTP",
-        "scripts": "ftp-anon,ftp-syst,ftp-vsftpd-backdoor,ftp-proftpd-backdoor,ftp-bounce",
+        "scripts": ",".join([
+            "ftp-anon",
+            "ftp-syst",
+            "ftp-vsftpd-backdoor",
+            "ftp-proftpd-backdoor",
+            "ftp-bounce",
+            "ftp-libopie",
+            "ftp-vuln-cve2010-4221",
+        ]),
         "extra_args": ""
     },
-    # SSH
+    # ── SSH ──────────────────────────────────────────────
     22: {
         "name": "SSH",
-        "scripts": "ssh-auth-methods,ssh2-enum-algos,ssh-hostkey",
+        "scripts": ",".join([
+            "ssh-auth-methods",
+            "ssh2-enum-algos",
+            "ssh-hostkey",
+            "ssh-publickey-acceptance",
+        ]),
         "extra_args": ""
     },
-    # Telnet
+    # ── Telnet ───────────────────────────────────────────
     23: {
         "name": "Telnet",
-        "scripts": "telnet-ntlm-info",
+        "scripts": ",".join([
+            "telnet-ntlm-info",
+            "banner",
+        ]),
         "extra_args": ""
     },
-    # SMTP
+    # ── SMTP ─────────────────────────────────────────────
     25: {
         "name": "SMTP",
-        "scripts": "smtp-commands,smtp-enum-users,smtp-ntlm-info,smtp-open-relay",
+        "scripts": ",".join([
+            "smtp-commands",
+            "smtp-enum-users",
+            "smtp-ntlm-info",
+            "smtp-open-relay",
+            "smtp-strangeport",
+            "smtp-vuln-cve2010-4344",
+            "smtp-vuln-cve2011-1720",
+            "smtp-vuln-cve2011-1764",
+        ]),
         "extra_args": ""
     },
-    # DNS
-    53: {
-        "name": "DNS",
-        "scripts": "dns-zone-transfer,dns-srv-enum,dns-recursion,dns-nsid",
-        "extra_args": ""
-    },
-    # HTTP
-    80: {
-        "name": "HTTP",
-        "scripts": "http-title,http-enum,http-methods,http-robots.txt,http-git,http-auth,http-headers,http-security-headers,http-ntlm-info,http-default-accounts,http-waf-detect",
-        "extra_args": ""
-    },
-    # Kerberos
-    88: {
-        "name": "Kerberos",
-        "scripts": "krb5-enum-users",
-        "extra_args": "--script-args krb5-enum-users.realm=DOMAIN.LOCAL"
-    },
-    # POP3
-    110: {
-        "name": "POP3",
-        "scripts": "pop3-capabilities,pop3-ntlm-info",
-        "extra_args": ""
-    },
-    # IDENT
-    113: {
-        "name": "IDENT",
-        "scripts": "auth-owners",
-        "extra_args": ""
-    },
-    # RPC
-    111: {
-        "name": "RPC",
-        "scripts": "rpcinfo",
-        "extra_args": ""
-    },
-    # IMAP
-    143: {
-        "name": "IMAP",
-        "scripts": "imap-capabilities,imap-ntlm-info",
-        "extra_args": ""
-    },
-    # SNMP (UDP)
-    161: {
-        "name": "SNMP",
-        "scripts": "snmp-info,snmp-sysdescr,snmp-interfaces,snmp-processes,snmp-netstat,snmp-win32-users,snmp-win32-shares,snmp-win32-services,snmp-win32-software",
-        "extra_args": "-sU"
-    },
-    # LDAP
-    389: {
-        "name": "LDAP",
-        "scripts": "ldap-rootdse,ldap-search",
-        "extra_args": ""
-    },
-    # HTTPS
-    443: {
-        "name": "HTTPS",
-        "scripts": "http-title,http-enum,http-methods,http-robots.txt,http-git,http-auth,http-headers,http-security-headers,http-ntlm-info,http-default-accounts,http-waf-detect,ssl-cert,ssl-enum-ciphers",
-        "extra_args": ""
-    },
-    # SMTPS
-    465: {
-        "name": "SMTPS",
-        "scripts": "smtp-commands,smtp-enum-users,smtp-ntlm-info",
-        "extra_args": ""
-    },
-    # MSSQL
-    1433: {
-        "name": "MSSQL",
-        "scripts": "ms-sql-info,ms-sql-empty-password,ms-sql-config,ms-sql-dump-hashes,ms-sql-ntlm-info,ms-sql-xp-cmdshell",
-        "extra_args": ""
-    },
-    # Oracle
-    1521: {
-        "name": "Oracle",
-        "scripts": "oracle-tns-version,oracle-sid-brute",
-        "extra_args": ""
-    },
-    # NFS
-    2049: {
-        "name": "NFS",
-        "scripts": "nfs-showmount,nfs-ls,nfs-statfs",
-        "extra_args": ""
-    },
-    # MySQL
-    3306: {
-        "name": "MySQL",
-        "scripts": "mysql-info,mysql-empty-password,mysql-enum,mysql-databases,mysql-users,mysql-dump-hashes",
-        "extra_args": ""
-    },
-    # RDP
-    3389: {
-        "name": "RDP",
-        "scripts": "rdp-enum-encryption,rdp-ntlm-info,rdp-vuln-ms12-020",
-        "extra_args": ""
-    },
-    # PostgreSQL
-    5432: {
-        "name": "PostgreSQL",
-        "scripts": "pgsql-brute",
-        "extra_args": ""
-    },
-    # VNC
-    5900: {
-        "name": "VNC",
-        "scripts": "vnc-info,realvnc-auth-bypass",
-        "extra_args": ""
-    },
-    # Redis
-    6379: {
-        "name": "Redis",
-        "scripts": "redis-info",
-        "extra_args": ""
-    },
-    # AJP Tomcat
-    8009: {
-        "name": "AJP",
-        "scripts": "ajp-headers,ajp-methods",
-        "extra_args": ""
-    },
-    # HTTP-Alt
-    8080: {
-        "name": "HTTP-Alt",
-        "scripts": "http-title,http-enum,http-methods,http-robots.txt,http-git,http-auth,http-headers,http-default-accounts,http-waf-detect",
-        "extra_args": ""
-    },
-    # HTTPS-Alt
-    8443: {
-        "name": "HTTPS-Alt",
-        "scripts": "http-title,http-enum,http-methods,http-robots.txt,http-git,http-auth,http-headers,http-default-accounts,http-waf-detect,ssl-cert",
-        "extra_args": ""
-    },
-    # SMB
-    139: {
-        "name": "SMB-NetBIOS",
-        "scripts": "smb-os-discovery,smb-security-mode,smb-enum-shares,smb-enum-users,smb-protocols,nbstat",
-        "extra_args": ""
-    },
-    445: {
-        "name": "SMB",
-        "scripts": "smb-os-discovery,smb-security-mode,smb-enum-shares,smb-enum-users,smb-protocols,smb2-security-mode,smb-vuln-ms17-010,smb-vuln-ms08-067,smb-double-pulsar-backdoor,smb-vuln-cve-2017-7494",
-        "extra_args": ""
-    },
-    # WinRM
-    5985: {
-        "name": "WinRM-HTTP",
-        "scripts": "http-auth-finder",
-        "extra_args": ""
-    },
-    5986: {
-        "name": "WinRM-HTTPS",
-        "scripts": "http-auth-finder,ssl-cert",
-        "extra_args": ""
-    },
-    # LDAPS
-    636: {
-        "name": "LDAPS",
-        "scripts": "ldap-rootdse,ldap-search,ssl-cert",
-        "extra_args": ""
-    },
-    # Global Catalog
-    3268: {
-        "name": "Global-Catalog",
-        "scripts": "ldap-rootdse,ldap-search",
-        "extra_args": ""
-    },
-    3269: {
-        "name": "Global-Catalog-SSL",
-        "scripts": "ldap-rootdse,ldap-search,ssl-cert",
-        "extra_args": ""
-    },
-    # MongoDB
-    27017: {
-        "name": "MongoDB",
-        "scripts": "mongodb-info,mongodb-databases",
-        "extra_args": ""
-    },
-    # distcc RCE
-    3632: {
-        "name": "distcc",
-        "scripts": "distcc-cve2004-2687",
-        "extra_args": ""
-    },
-    # Java Debug
-    5005: {
-        "name": "JDWP",
-        "scripts": "jdwp-exec,jdwp-info",
-        "extra_args": ""
-    },
-    # rsync
-    873: {
-        "name": "rsync",
-        "scripts": "rsync-list-modules",
-        "extra_args": ""
-    },
-    # MSRPC
-    135: {
-        "name": "MSRPC",
-        "scripts": "msrpc-enum",
-        "extra_args": ""
-    },
-    # SMTP submission
-    587: {
-        "name": "SMTP-Submission",
-        "scripts": "smtp-commands,smtp-ntlm-info,smtp-open-relay",
-        "extra_args": ""
-    },
-    # AD Web Services
-    9389: {
-        "name": "AD-Web-Services",
-        "scripts": "http-auth-finder",
-        "extra_args": ""
-    },
-    # IRC
-    6667: {
-        "name": "IRC",
-        "scripts": "irc-unrealircd-backdoor,irc-info",
-        "extra_args": ""
-    },
-    # Finger
+    # ── Finger ───────────────────────────────────────────
     79: {
         "name": "Finger",
-        "scripts": "finger",
+        "scripts": ",".join([
+            "finger",
+        ]),
+        "extra_args": ""
+    },
+    # ── HTTP ─────────────────────────────────────────────
+    80: {
+        "name": "HTTP",
+        "scripts": ",".join([
+            "http-title",
+            "http-enum",
+            "http-methods",
+            "http-robots.txt",
+            "http-git",
+            "http-auth",
+            "http-auth-finder",
+            "http-headers",
+            "http-security-headers",
+            "http-ntlm-info",
+            "http-default-accounts",
+            "http-waf-detect",
+            "http-waf-fingerprint",
+            "http-shellshock",
+            "http-vuln-cve2017-5638",
+            "http-vuln-cve2014-3704",
+            "http-vuln-cve2015-1635",
+            "http-vuln-cve2012-1823",
+            "http-vuln-cve2010-0738",
+            "http-vuln-cve2010-2861",
+            "http-iis-webdav-vuln",
+            "http-method-tamper",
+            "http-passwd",
+            "http-open-redirect",
+            "http-cors",
+            "http-cookie-flags",
+            "http-cross-domain-policy",
+            "http-internal-ip-disclosure",
+            "http-server-header",
+            "http-favicon",
+            "http-generator",
+            "http-php-version",
+            "http-apache-server-status",
+            "http-aspnet-debug",
+            "http-webdav-scan",
+            "http-wordpress-enum",
+            "http-wordpress-users",
+            "http-drupal-enum",
+            "http-drupal-enum-users",
+            "http-bigip-cookie",
+            "http-backup-finder",
+            "http-config-backup",
+            "http-trace",
+            "http-useragent-tester",
+            "http-vhosts",
+        ]),
+        "extra_args": ""
+    },
+    # ── Kerberos ─────────────────────────────────────────
+    88: {
+        "name": "Kerberos",
+        "scripts": ",".join([
+            "krb5-enum-users",
+        ]),
+        "extra_args": "--script-args krb5-enum-users.realm=DOMAIN.LOCAL"
+    },
+    # ── POP3 ─────────────────────────────────────────────
+    110: {
+        "name": "POP3",
+        "scripts": ",".join([
+            "pop3-capabilities",
+            "pop3-ntlm-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── RPC ──────────────────────────────────────────────
+    111: {
+        "name": "RPC",
+        "scripts": ",".join([
+            "rpcinfo",
+            "nfs-showmount",
+        ]),
+        "extra_args": ""
+    },
+    # ── IDENT ────────────────────────────────────────────
+    113: {
+        "name": "IDENT",
+        "scripts": ",".join([
+            "auth-owners",
+            "auth-spoof",
+        ]),
+        "extra_args": ""
+    },
+    # ── IMAP ─────────────────────────────────────────────
+    143: {
+        "name": "IMAP",
+        "scripts": ",".join([
+            "imap-capabilities",
+            "imap-ntlm-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── SNMP UDP ─────────────────────────────────────────
+    161: {
+        "name": "SNMP",
+        "scripts": ",".join([
+            "snmp-info",
+            "snmp-sysdescr",
+            "snmp-interfaces",
+            "snmp-processes",
+            "snmp-netstat",
+            "snmp-win32-users",
+            "snmp-win32-shares",
+            "snmp-win32-services",
+            "snmp-win32-software",
+            "snmp-hh3c-logins",
+            "snmp-ios-config",
+        ]),
+        "extra_args": "-sU"
+    },
+    # ── LDAP ─────────────────────────────────────────────
+    389: {
+        "name": "LDAP",
+        "scripts": ",".join([
+            "ldap-rootdse",
+            "ldap-search",
+            "ldap-novell-getpass",
+        ]),
+        "extra_args": ""
+    },
+    # ── HTTPS ────────────────────────────────────────────
+    443: {
+        "name": "HTTPS",
+        "scripts": ",".join([
+            "http-title",
+            "http-enum",
+            "http-methods",
+            "http-robots.txt",
+            "http-git",
+            "http-auth",
+            "http-auth-finder",
+            "http-headers",
+            "http-security-headers",
+            "http-ntlm-info",
+            "http-default-accounts",
+            "http-waf-detect",
+            "http-waf-fingerprint",
+            "http-shellshock",
+            "http-vuln-cve2017-5638",
+            "http-vuln-cve2014-3704",
+            "http-vuln-cve2015-1635",
+            "http-vuln-cve2012-1823",
+            "http-vuln-cve2010-0738",
+            "http-iis-webdav-vuln",
+            "http-method-tamper",
+            "http-passwd",
+            "http-open-redirect",
+            "http-cors",
+            "http-cookie-flags",
+            "http-cross-domain-policy",
+            "http-internal-ip-disclosure",
+            "http-server-header",
+            "http-favicon",
+            "http-generator",
+            "http-php-version",
+            "http-apache-server-status",
+            "http-aspnet-debug",
+            "http-webdav-scan",
+            "http-wordpress-enum",
+            "http-wordpress-users",
+            "http-drupal-enum",
+            "http-bigip-cookie",
+            "http-backup-finder",
+            "http-config-backup",
+            "http-trace",
+            "http-vhosts",
+            "ssl-cert",
+            "ssl-enum-ciphers",
+            "ssl-heartbleed",
+            "rsa-vuln-roca",
+        ]),
+        "extra_args": ""
+    },
+    # ── SMTPS ────────────────────────────────────────────
+    465: {
+        "name": "SMTPS",
+        "scripts": ",".join([
+            "smtp-commands",
+            "smtp-enum-users",
+            "smtp-ntlm-info",
+            "smtp-open-relay",
+        ]),
+        "extra_args": ""
+    },
+    # ── SUBMISSION ───────────────────────────────────────
+    587: {
+        "name": "SMTP-Submission",
+        "scripts": ",".join([
+            "smtp-commands",
+            "smtp-ntlm-info",
+            "smtp-open-relay",
+            "smtp-enum-users",
+        ]),
+        "extra_args": ""
+    },
+    # ── LDAPS ────────────────────────────────────────────
+    636: {
+        "name": "LDAPS",
+        "scripts": ",".join([
+            "ldap-rootdse",
+            "ldap-search",
+            "ssl-cert",
+            "ssl-enum-ciphers",
+        ]),
+        "extra_args": ""
+    },
+    # ── rsync ────────────────────────────────────────────
+    873: {
+        "name": "rsync",
+        "scripts": ",".join([
+            "rsync-list-modules",
+        ]),
+        "extra_args": ""
+    },
+    # ── IMAP SSL ─────────────────────────────────────────
+    993: {
+        "name": "IMAPS",
+        "scripts": ",".join([
+            "imap-capabilities",
+            "imap-ntlm-info",
+            "ssl-cert",
+        ]),
+        "extra_args": ""
+    },
+    # ── POP3 SSL ─────────────────────────────────────────
+    995: {
+        "name": "POP3S",
+        "scripts": ",".join([
+            "pop3-capabilities",
+            "pop3-ntlm-info",
+            "ssl-cert",
+        ]),
+        "extra_args": ""
+    },
+    # ── MSRPC ────────────────────────────────────────────
+    135: {
+        "name": "MSRPC",
+        "scripts": ",".join([
+            "msrpc-enum",
+        ]),
+        "extra_args": ""
+    },
+    # ── NetBIOS ──────────────────────────────────────────
+    137: {
+        "name": "NetBIOS-NS",
+        "scripts": ",".join([
+            "nbstat",
+            "nbns-interfaces",
+        ]),
+        "extra_args": "-sU"
+    },
+    # ── SMB NetBIOS ──────────────────────────────────────
+    139: {
+        "name": "SMB-NetBIOS",
+        "scripts": ",".join([
+            "smb-os-discovery",
+            "smb-security-mode",
+            "smb-enum-shares",
+            "smb-enum-users",
+            "smb-enum-groups",
+            "smb-enum-domains",
+            "smb-enum-sessions",
+            "smb-enum-services",
+            "smb-protocols",
+            "smb-system-info",
+            "nbstat",
+        ]),
+        "extra_args": ""
+    },
+    # ── SMB ──────────────────────────────────────────────
+    445: {
+        "name": "SMB",
+        "scripts": ",".join([
+            "smb-os-discovery",
+            "smb-security-mode",
+            "smb-enum-shares",
+            "smb-enum-users",
+            "smb-enum-groups",
+            "smb-enum-domains",
+            "smb-enum-sessions",
+            "smb-enum-services",
+            "smb-enum-processes",
+            "smb-protocols",
+            "smb2-security-mode",
+            "smb2-capabilities",
+            "smb2-time",
+            "smb-system-info",
+            "smb-server-stats",
+            "smb-mbenum",
+            "smb-vuln-ms17-010",
+            "smb-vuln-ms08-067",
+            "smb-vuln-ms06-025",
+            "smb-vuln-ms07-029",
+            "smb-vuln-ms10-054",
+            "smb-vuln-ms10-061",
+            "smb-vuln-cve-2017-7494",
+            "smb-vuln-cve2009-3103",
+            "smb-double-pulsar-backdoor",
+            "smb-vuln-webexec",
+            "samba-vuln-cve-2012-1182",
+        ]),
+        "extra_args": ""
+    },
+    # ── MSSQL ────────────────────────────────────────────
+    1433: {
+        "name": "MSSQL",
+        "scripts": ",".join([
+            "ms-sql-info",
+            "ms-sql-empty-password",
+            "ms-sql-config",
+            "ms-sql-dump-hashes",
+            "ms-sql-ntlm-info",
+            "ms-sql-xp-cmdshell",
+            "ms-sql-hasdbaccess",
+            "ms-sql-tables",
+            "ms-sql-dac",
+            "broadcast-ms-sql-discover",
+        ]),
+        "extra_args": ""
+    },
+    # ── Oracle ───────────────────────────────────────────
+    1521: {
+        "name": "Oracle",
+        "scripts": ",".join([
+            "oracle-tns-version",
+            "oracle-sid-brute",
+            "oracle-enum-users",
+        ]),
+        "extra_args": ""
+    },
+    # ── NFS ──────────────────────────────────────────────
+    2049: {
+        "name": "NFS",
+        "scripts": ",".join([
+            "nfs-showmount",
+            "nfs-ls",
+            "nfs-statfs",
+        ]),
+        "extra_args": ""
+    },
+    # ── MySQL ────────────────────────────────────────────
+    3306: {
+        "name": "MySQL",
+        "scripts": ",".join([
+            "mysql-info",
+            "mysql-empty-password",
+            "mysql-enum",
+            "mysql-databases",
+            "mysql-users",
+            "mysql-variables",
+            "mysql-dump-hashes",
+            "mysql-audit",
+            "mysql-vuln-cve2012-2122",
+        ]),
+        "extra_args": ""
+    },
+    # ── RDP ──────────────────────────────────────────────
+    3389: {
+        "name": "RDP",
+        "scripts": ",".join([
+            "rdp-enum-encryption",
+            "rdp-ntlm-info",
+            "rdp-vuln-ms12-020",
+        ]),
+        "extra_args": ""
+    },
+    # ── distcc ───────────────────────────────────────────
+    3632: {
+        "name": "distcc",
+        "scripts": ",".join([
+            "distcc-cve2004-2687",
+        ]),
+        "extra_args": ""
+    },
+    # ── PostgreSQL ───────────────────────────────────────
+    5432: {
+        "name": "PostgreSQL",
+        "scripts": ",".join([
+            "pgsql-brute",
+        ]),
+        "extra_args": ""
+    },
+    # ── VNC ──────────────────────────────────────────────
+    5900: {
+        "name": "VNC",
+        "scripts": ",".join([
+            "vnc-info",
+            "realvnc-auth-bypass",
+        ]),
+        "extra_args": ""
+    },
+    # ── WinRM HTTP ───────────────────────────────────────
+    5985: {
+        "name": "WinRM-HTTP",
+        "scripts": ",".join([
+            "http-auth-finder",
+            "http-ntlm-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── WinRM HTTPS ──────────────────────────────────────
+    5986: {
+        "name": "WinRM-HTTPS",
+        "scripts": ",".join([
+            "http-auth-finder",
+            "http-ntlm-info",
+            "ssl-cert",
+        ]),
+        "extra_args": ""
+    },
+    # ── JDWP ─────────────────────────────────────────────
+    5005: {
+        "name": "JDWP",
+        "scripts": ",".join([
+            "jdwp-exec",
+            "jdwp-info",
+            "jdwp-inject",
+            "jdwp-version",
+        ]),
+        "extra_args": ""
+    },
+    # ── IPMI UDP ─────────────────────────────────────────
+    623: {
+        "name": "IPMI",
+        "scripts": ",".join([
+            "ipmi-version",
+            "ipmi-cipher-zero",
+        ]),
+        "extra_args": "-sU"
+    },
+    # ── Redis ────────────────────────────────────────────
+    6379: {
+        "name": "Redis",
+        "scripts": ",".join([
+            "redis-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── IRC ──────────────────────────────────────────────
+    6667: {
+        "name": "IRC",
+        "scripts": ",".join([
+            "irc-unrealircd-backdoor",
+            "irc-info",
+            "irc-botnet-channels",
+        ]),
+        "extra_args": ""
+    },
+    # ── AJP Tomcat ───────────────────────────────────────
+    8009: {
+        "name": "AJP",
+        "scripts": ",".join([
+            "ajp-headers",
+            "ajp-methods",
+            "ajp-auth",
+            "ajp-request",
+        ]),
+        "extra_args": ""
+    },
+    # ── HTTP Alt ─────────────────────────────────────────
+    8080: {
+        "name": "HTTP-Alt",
+        "scripts": ",".join([
+            "http-title",
+            "http-enum",
+            "http-methods",
+            "http-robots.txt",
+            "http-git",
+            "http-auth",
+            "http-auth-finder",
+            "http-headers",
+            "http-security-headers",
+            "http-ntlm-info",
+            "http-default-accounts",
+            "http-waf-detect",
+            "http-shellshock",
+            "http-vuln-cve2017-5638",
+            "http-vuln-cve2014-3704",
+            "http-vuln-cve2015-1635",
+            "http-iis-webdav-vuln",
+            "http-method-tamper",
+            "http-passwd",
+            "http-open-redirect",
+            "http-cors",
+            "http-cookie-flags",
+            "http-internal-ip-disclosure",
+            "http-server-header",
+            "http-favicon",
+            "http-backup-finder",
+            "http-config-backup",
+            "http-trace",
+            "http-wordpress-enum",
+            "http-wordpress-users",
+            "http-drupal-enum",
+        ]),
+        "extra_args": ""
+    },
+    # ── HTTPS Alt ────────────────────────────────────────
+    8443: {
+        "name": "HTTPS-Alt",
+        "scripts": ",".join([
+            "http-title",
+            "http-enum",
+            "http-methods",
+            "http-robots.txt",
+            "http-git",
+            "http-auth",
+            "http-auth-finder",
+            "http-headers",
+            "http-security-headers",
+            "http-ntlm-info",
+            "http-default-accounts",
+            "http-waf-detect",
+            "http-shellshock",
+            "http-vuln-cve2017-5638",
+            "http-vuln-cve2014-3704",
+            "http-iis-webdav-vuln",
+            "http-method-tamper",
+            "http-passwd",
+            "http-open-redirect",
+            "http-cors",
+            "http-cookie-flags",
+            "http-internal-ip-disclosure",
+            "http-server-header",
+            "http-backup-finder",
+            "http-config-backup",
+            "http-trace",
+            "ssl-cert",
+            "ssl-enum-ciphers",
+            "ssl-heartbleed",
+        ]),
+        "extra_args": ""
+    },
+    # ── AD Web Services ──────────────────────────────────
+    9389: {
+        "name": "AD-Web-Services",
+        "scripts": ",".join([
+            "http-auth-finder",
+            "http-ntlm-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── Global Catalog ───────────────────────────────────
+    3268: {
+        "name": "Global-Catalog",
+        "scripts": ",".join([
+            "ldap-rootdse",
+            "ldap-search",
+        ]),
+        "extra_args": ""
+    },
+    # ── Global Catalog SSL ───────────────────────────────
+    3269: {
+        "name": "Global-Catalog-SSL",
+        "scripts": ",".join([
+            "ldap-rootdse",
+            "ldap-search",
+            "ssl-cert",
+        ]),
+        "extra_args": ""
+    },
+    # ── MongoDB ──────────────────────────────────────────
+    27017: {
+        "name": "MongoDB",
+        "scripts": ",".join([
+            "mongodb-info",
+            "mongodb-databases",
+        ]),
+        "extra_args": ""
+    },
+    # ── Memcached ────────────────────────────────────────
+    11211: {
+        "name": "Memcached",
+        "scripts": ",".join([
+            "memcached-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── CouchDB ──────────────────────────────────────────
+    5984: {
+        "name": "CouchDB",
+        "scripts": ",".join([
+            "couchdb-databases",
+            "couchdb-stats",
+        ]),
+        "extra_args": ""
+    },
+    # ── Cassandra ────────────────────────────────────────
+    9042: {
+        "name": "Cassandra",
+        "scripts": ",".join([
+            "cassandra-info",
+        ]),
+        "extra_args": ""
+    },
+    # ── Elasticsearch ────────────────────────────────────
+    9200: {
+        "name": "Elasticsearch",
+        "scripts": ",".join([
+            "http-title",
+            "http-methods",
+            "http-open-proxy",
+        ]),
+        "extra_args": ""
+    },
+    # ── Docker ───────────────────────────────────────────
+    2375: {
+        "name": "Docker",
+        "scripts": ",".join([
+            "docker-version",
+        ]),
+        "extra_args": ""
+    },
+    # ── RMI ──────────────────────────────────────────────
+    1099: {
+        "name": "RMI",
+        "scripts": ",".join([
+            "rmi-dumpregistry",
+            "rmi-vuln-classloader",
+        ]),
+        "extra_args": ""
+    },
+    # ── PPTP ─────────────────────────────────────────────
+    1723: {
+        "name": "PPTP",
+        "scripts": ",".join([
+            "pptp-version",
+        ]),
+        "extra_args": ""
+    },
+    # ── TFTP UDP ─────────────────────────────────────────
+    69: {
+        "name": "TFTP",
+        "scripts": ",".join([
+            "tftp-enum",
+        ]),
+        "extra_args": "-sU"
+    },
+    # ── NTP UDP ──────────────────────────────────────────
+    123: {
+        "name": "NTP",
+        "scripts": ",".join([
+            "ntp-info",
+            "ntp-monlist",
+        ]),
+        "extra_args": "-sU"
+    },
+    # ── DNS TCP ──────────────────────────────────────────
+    53: {
+        "name": "DNS",
+        "scripts": ",".join([
+            "dns-zone-transfer",
+            "dns-srv-enum",
+            "dns-recursion",
+            "dns-nsid",
+            "dns-cache-snoop",
+            "dns-check-zone",
+            "dns-random-srcport",
+            "dns-random-txid",
+            "dns-nsec-enum",
+            "dns-brute",
+            "fcrdns",
+        ]),
         "extra_args": ""
     },
 }
 
-
-# ══════════════════════════════════════════════════════════
 #  HELPERS
 # ══════════════════════════════════════════════════════════
 def banner():
