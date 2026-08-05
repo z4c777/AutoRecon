@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-#This tool was generated with AI
 """
 AutoRecon — Automated Nmap Enumeration Script
-For CTFs (HackTheBox, CPTS, etc.)
+For authorized penetration testing only (HackTheBox, CPTS, etc.)
 
 Usage:
     python3 autorecon.py -t TARGET_IP
