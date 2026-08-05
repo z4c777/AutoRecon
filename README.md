@@ -2,7 +2,7 @@
 
 Automated Nmap enumeration script for penetration testing. Performs multi-phase scanning — discovers open ports, detects services, runs targeted NSE scripts, and produces a clean summary report.
 
-Built for CTF's such as HackTheBox.
+Built for HackTheBox CPTS and general CTF/pentest engagements.
 
 ---
 
@@ -36,7 +36,7 @@ pip install python-nmap
 git clone https://github.com/yourrepo/autorecon
 cd autorecon
 pip install python-nmap
-chmod +x autorecon_v2.py
+chmod +x autorecon.py
 ```
 
 ---
@@ -44,26 +44,26 @@ chmod +x autorecon_v2.py
 ## Usage
 
 ```bash
-python3 autorecon_v2.py -t TARGET [options]
+python3 autorecon.py -t TARGET [options]
 ```
 
 ### Basic Examples
 
 ```bash
 # Full scan against single target
-python3 autorecon_v2.py -t 10.129.1.5
+python3 autorecon.py -t 10.129.1.5
 
 # Custom output directory
-python3 autorecon_v2.py -t 10.129.1.5 -o /home/user/htb/machine_name
+python3 autorecon.py -t 10.129.1.5 -o /home/user/htb/machine_name
 
 # Subnet sweep — discover live hosts then scan each one
-python3 autorecon_v2.py -t 10.129.1.0/24 --sweep
+python3 autorecon.py -t 10.129.1.0/24 --sweep
 
 # Skip UDP and vuln scan for speed
-python3 autorecon_v2.py -t 10.129.1.5 --skip-udp --skip-vuln
+python3 autorecon.py -t 10.129.1.5 --skip-udp --skip-vuln
 
 # Port discovery only — no script enumeration
-python3 autorecon_v2.py -t 10.129.1.5 --ports-only
+python3 autorecon.py -t 10.129.1.5 --ports-only
 ```
 
 ### All Options
@@ -247,7 +247,7 @@ autorecon_20260805_120000/
 
 ## Adding Custom Services
 
-To add a new service open `autorecon_v2.py` and add an entry to the `SERVICE_SCRIPTS` dictionary:
+To add a new service open `autorecon.py` and add an entry to the `SERVICE_SCRIPTS` dictionary:
 
 ```python
 SERVICE_SCRIPTS = {
@@ -288,6 +288,7 @@ The script will automatically run your custom scripts whenever port 1234 is foun
 
 ### v1.0
 - Initial release with 40 service mappings
+
 ---
 
 ## Disclaimer
