@@ -891,6 +891,70 @@ def save_output(output_dir, filename, content):
     return filepath
 
 
+def check_target_reachable(target):
+    """
+    Verify target is reachable before scanning.
+    Returns (reachable: bool, message: str)
+    """
+    import socket
+    import subprocess as sp
+
+    # Resolve hostname to IP first
+    resolved_ip = target
+    if not is_ip(target):
+        try:
+            resolved_ip = socket.gethostbyname(target)
+            log(f"Resolved {target} to {resolved_ip}")
+        except socket.gaierror:
+            return False, f"Cannot resolve hostname '{target}' — check the target is correct and DNS is working"
+
+    # Validate IP format
+    try:
+        socket.inet_aton(resolved_ip.split('/')[0])
+    except socket.error:
+        return False, f"Invalid IP address format: {target}"
+
+    # Check if target is on local network or routable
+    # Skip ping check for subnets — sweep handles that
+    if '/' in target:
+        return True, "Subnet target — skipping reachability check"
+
+    # Ping check — 3 packets, 2 second timeout
+    ping_result = sp.run(
+        ["ping", "-c", "3", "-W", "2", resolved_ip],
+        capture_output=True,
+        text=True
+    )
+
+    if ping_result.returncode == 0:
+        return True, f"Target {resolved_ip} is reachable"
+
+    # Ping failed — could be firewall blocking ICMP
+    # Try TCP connect on common ports before giving up
+    common_ports = [22, 80, 443, 445, 3389]
+    for port in common_ports:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex((resolved_ip, port))
+            sock.close()
+            if result == 0:
+                return True, f"Target {resolved_ip} is reachable (port {port}/tcp open)"
+        except Exception:
+            continue
+
+    # Both ping and TCP failed
+    return False, (
+        f"Target {resolved_ip} appears unreachable\n"
+        f"  Possible causes:\n"
+        f"  — Host is down or does not exist\n"
+        f"  — VPN not connected (required for HackTheBox/CPTS)\n"
+        f"  — Firewall blocking all traffic\n"
+        f"  — Wrong IP address\n"
+        f"  Tip: Check VPN with 'ip a' and confirm tun0 interface exists"
+    )
+
+
 def run_nmap_subprocess(target, args, output_dir, filename, use_oA=False):
     """
     Run nmap directly via subprocess.
@@ -909,14 +973,37 @@ def run_nmap_subprocess(target, args, output_dir, filename, use_oA=False):
     cmd += f" {target}"
     log(f"Running: {cmd}")
 
-    result = subprocess.run(
-        cmd.split(),
-        capture_output=True,
-        text=True
-    )
+    try:
+        result = subprocess.run(
+            cmd.split(),
+            capture_output=True,
+            text=True,
+            timeout=600   # 10 minute timeout per nmap command
+        )
+    except subprocess.TimeoutExpired:
+        log(f"Nmap command timed out after 10 minutes — {filename}", "error")
+        return ""
+    except FileNotFoundError:
+        log("nmap not found — install with: sudo apt install nmap", "error")
+        sys.exit(1)
+    except Exception as e:
+        log(f"Unexpected error running nmap: {e}", "error")
+        return ""
 
     output = result.stdout
-    if result.stderr:
+
+    # Check for common nmap errors
+    if result.returncode != 0:
+        if "Failed to resolve" in result.stderr or "Failed to resolve" in output:
+            log(f"Target could not be resolved — check hostname is correct", "error")
+        elif "Host seems down" in output:
+            log(f"Target appears down — try running with -Pn or check connectivity", "warn")
+        elif "Permission denied" in result.stderr:
+            log(f"Permission denied — try running with sudo", "error")
+        else:
+            log(f"Nmap returned non-zero exit code: {result.returncode}", "warn")
+
+    if result.stderr and "WARNING" not in result.stderr:
         output += f"\n[STDERR]\n{result.stderr}"
 
     # Always save .txt
@@ -946,19 +1033,32 @@ def phase1_port_discovery(target, output_dir):
             arguments="-Pn -p- --min-rate 5000 --open"
         )
     except Exception as e:
-        log(f"Scan error: {e}", "error")
+        log(f"Port discovery error: {e}", "error")
+        log("Check that the target is reachable and nmap is installed", "error")
         return []
 
     open_ports = []
 
     for host in nm.all_hosts():
-        log(f"Host: {host} ({nm[host].state()})", "success")
-
+        state = nm[host].state()
+        if state == 'down':
+            log(f"Host {host} appears to be down", "warn")
+            log("If the host is up but blocking ping try: python3 autorecon.py -t TARGET (nmap uses -Pn by default)", "warn")
+            continue
+        log(f"Host: {host} ({state})", "success")
         if 'tcp' in nm[host]:
             for port, data in nm[host]['tcp'].items():
                 if data['state'] == 'open':
                     open_ports.append(port)
                     log(f"  Port {port}/tcp OPEN", "success")
+
+    if not open_ports:
+        log("No open TCP ports found", "warn")
+        log("Possible reasons:", "warn")
+        log("  — Host is down or unreachable", "warn")
+        log("  — All ports are filtered by a firewall", "warn")
+        log("  — VPN not connected (HackTheBox requires tun0)", "warn")
+        log("  — Wrong target IP", "warn")
 
     # Save raw results
     raw_output = f"Open TCP Ports on {target}:\n"
@@ -1639,6 +1739,17 @@ def main():
     log(f"Output directory: {output_dir}")
 
     targets = [args.target]
+
+    # Reachability check — skip for subnets (sweep handles that)
+    if '/' not in args.target:
+        log(f"Checking if target is reachable...")
+        reachable, message = check_target_reachable(args.target)
+        if reachable:
+            log(message, "success")
+        else:
+            log(f"Target unreachable: {message}", "error")
+            log("Aborting scan — fix connectivity and try again", "error")
+            sys.exit(1)
 
     # Host sweep for subnets
     if args.sweep:
