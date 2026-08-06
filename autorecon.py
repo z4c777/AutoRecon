@@ -1422,6 +1422,30 @@ def generate_report(target, open_ports, services, script_results, vuln_results, 
                         if line and not line.startswith('|') and not line.startswith('|_') and not line.startswith('SF') and '/tcp' in line and str(port) not in line:
                             break
                         if line.startswith('|') or line.startswith('|_'):
+                            # Skip SSH algorithm enumeration lines — noise
+                            skip_patterns = [
+                                "kex_algorithms",
+                                "server_host_key_algorithms",
+                                "encryption_algorithms",
+                                "mac_algorithms",
+                                "compression_algorithms",
+                                "curve25519", "ecdh-sha2",
+                                "diffie-hellman",
+                                "chacha20", "aes128", "aes192", "aes256",
+                                "umac-", "hmac-",
+                                "zlib@", "none",
+                                "rsa-sha2", "ssh-rsa", "ecdsa-sha2",
+                                "ssh-ed25519", "ssh2-enum-algos",
+                            ]
+                            if any(p in line for p in skip_patterns):
+                                # Still flag weak algorithms
+                                weak = ["arcfour", "3des-cbc", "blowfish-cbc",
+                                        "diffie-hellman-group1-sha1",
+                                        "diffie-hellman-group14-sha1",
+                                        "hmac-md5", "ssh-dss"]
+                                if any(w in line for w in weak):
+                                    report.append(f"  [WEAK ALGO] {line.strip()}")
+                                continue
                             report.append(f"  {line}")
 
         report.append("")
