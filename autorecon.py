@@ -943,7 +943,7 @@ def phase1_port_discovery(target, output_dir):
     try:
         nm.scan(
             hosts=target,
-            arguments="-Pn -p- --min-rate 5000 --open -T4"
+            arguments="-Pn -p- --min-rate 5000 --open"
         )
     except Exception as e:
         log(f"Scan error: {e}", "error")
@@ -991,27 +991,29 @@ def phase2_service_detection(target, open_ports, output_dir):
                 use_oA=USE_OA
     )
 
-    # Parse services from output for display
+    # Parse services from nmap output directly — no second scan
     services = {}
-    nm = nmap.PortScanner()
-    try:
-        nm.scan(
-            hosts=target,
-            arguments=f"-Pn -sCV -p{ports_str}"
-        )
-        for host in nm.all_hosts():
-            if 'tcp' in nm[host]:
-                for port, data in nm[host]['tcp'].items():
-                    services[port] = {
-                        "name": data.get('name', 'unknown'),
-                        "product": data.get('product', ''),
-                        "version": data.get('version', ''),
-                        "state": data.get('state', '')
-                    }
-                    svc_info = f"{data.get('name','')} {data.get('product','')} {data.get('version','')}".strip()
-                    log(f"  {port}/tcp — {svc_info}", "success")
-    except Exception as e:
-        log(f"Service detection parse error: {e}", "warn")
+    current_port = None
+    for line in output.split('\n'):
+        # Match port lines: "80/tcp   open  http    Apache httpd 2.4.41"
+        import re
+        port_match = re.match(r'^(\d+)/tcp\s+(\w+)\s+(\S+)\s*(.*)', line)
+        if port_match:
+            port_num  = int(port_match.group(1))
+            state     = port_match.group(2)
+            svc_name  = port_match.group(3)
+            version   = port_match.group(4).strip()
+            # Split version into product + version
+            parts = version.split(' ', 1)
+            product = parts[0] if parts else ''
+            ver     = parts[1] if len(parts) > 1 else ''
+            services[port_num] = {
+                "name":    svc_name,
+                "product": product,
+                "version": ver,
+                "state":   state
+            }
+            log(f"  {port_num}/tcp — {svc_name} {version}".strip(), "success")
 
     return services
 
@@ -1231,55 +1233,74 @@ def post_scan_tips(port, svc_name, target):
 
 def phase4_script_enumeration(target, open_ports, output_dir, services=None):
     """
-    For each open port run the appropriate NSE scripts.
-    Uses get_scripts_for_port() to match by port number first,
-    then by detected service name for non-standard ports.
-    e.g. FTP on port 2121 will still run ftp-* scripts.
+    Run all NSE scripts in a single nmap command instead of
+    one per port — dramatically faster than sequential calls.
+    Scripts are selected per port then deduplicated and combined.
+    UDP ports run separately since they need -sU flag.
     """
     log("PHASE 4 — Targeted NSE Script Enumeration", "section")
 
     if services is None:
         services = {}
 
-    results = {}
+    results      = {}
+    tcp_scripts  = set()
+    udp_scripts  = set()
+    tcp_ports    = []
+    udp_ports    = []
+    unmapped     = []
+    port_svc_map = {}
 
+    # ── Build combined script sets ───────────────────────
     for port in open_ports:
         svc_config = get_scripts_for_port(port, services)
 
         if svc_config:
-            svc_name = svc_config["name"]
-            scripts  = svc_config["scripts"]
-            extra    = svc_config["extra_args"]
+            port_svc_map[port] = svc_config
+            scripts = [s.strip() for s in svc_config["scripts"].split(",")]
 
-            log(f"\n[Port {port}] {svc_name} — Running scripts...")
+            if "-sU" in svc_config.get("extra_args", ""):
+                udp_scripts.update(scripts)
+                udp_ports.append(port)
+            else:
+                tcp_scripts.update(scripts)
+                tcp_ports.append(port)
+        else:
+            unmapped.append(port)
 
-            args = f"-Pn {extra} --script {scripts} -p {port}"
+    # ── Run one TCP script command for all ports ─────────
+    if tcp_ports and tcp_scripts:
+        ports_str   = ",".join([str(p) for p in tcp_ports])
+        scripts_str = ",".join(sorted(tcp_scripts))
 
-            output = run_nmap_subprocess(
-                target=target,
-                args=args,
-                output_dir=output_dir,
-                filename=f"04_{port}_{svc_name.lower()}_scripts.txt",
-                use_oA=USE_OA
-            )
+        log(f"Running {len(tcp_scripts)} scripts against {len(tcp_ports)} TCP ports in one pass...")
+
+        output = run_nmap_subprocess(
+            target=target,
+            args=f"-Pn --script {scripts_str} -p {ports_str}",
+            output_dir=output_dir,
+            filename="04_tcp_scripts.txt",
+            use_oA=USE_OA
+        )
+
+        # Store output for each port and highlight findings
+        for port in tcp_ports:
+            svc_config = port_svc_map.get(port, {})
+            svc_name   = svc_config.get("name", "unknown")
 
             results[port] = {
                 "service": svc_name,
-                "scripts": scripts,
-                "output": output
+                "scripts": svc_config.get("scripts", ""),
+                "output":  output
             }
 
             # Highlight interesting findings
             for line in output.split('\n'):
-                # Skip SSH algorithm identifiers — not actionable
                 if "@openssh.com" in line:
-                    # Check for weak algorithms even in openssh.com lines
-                    weak_algos = [
-                        "arcfour", "blowfish-cbc", "3des-cbc",
-                        "diffie-hellman-group1-sha1",
-                        "diffie-hellman-group14-sha1",
-                        "hmac-md5", "ssh-dss",
-                    ]
+                    weak_algos = ["arcfour", "blowfish-cbc", "3des-cbc",
+                                  "diffie-hellman-group1-sha1",
+                                  "diffie-hellman-group14-sha1",
+                                  "hmac-md5", "ssh-dss"]
                     if any(w in line for w in weak_algos):
                         log(f"  [WEAK ALGO] {line.strip()}", "warn")
                     continue
@@ -1288,28 +1309,61 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
                 weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
                 if any(w in line for w in weak_standalone):
                     log(f"  [WEAK ALGO] {line.strip()}", "warn")
-                keywords = [
-                    "VULNERABLE", "vulnerable", "CVE-",
-                    "Anonymous", "anonymous", "password:",
-                    "credential", "admin", "root",
-                    "ERROR", "open", "uid=", "id="
-                ]
+                keywords = ["VULNERABLE", "vulnerable", "CVE-",
+                            "Anonymous", "anonymous", "password:",
+                            "credential", "admin", "root",
+                            "ERROR", "open", "uid=", "id="]
                 if any(kw in line for kw in keywords):
                     log(f"  [INTERESTING] {line.strip()}", "warn")
 
-            # Post-scan tips based on service
+        # Post-scan tips for all TCP services
+        for port in tcp_ports:
+            svc_name = port_svc_map.get(port, {}).get("name", "")
             post_scan_tips(port, svc_name, target)
 
-        else:
-            log(f"[Port {port}] No scripts matched — running default scripts")
-            output = run_nmap_subprocess(
-                target=target,
-                args=f"-Pn -sCV --script default -p {port}",
-                output_dir=output_dir,
-                filename=f"04_{port}_unknown_default.txt",
-                use_oA=USE_OA
-            )
+    # ── Run UDP scripts separately ────────────────────────
+    if udp_ports and udp_scripts:
+        ports_str   = ",".join([str(p) for p in udp_ports])
+        scripts_str = ",".join(sorted(udp_scripts))
 
+        log(f"Running {len(udp_scripts)} scripts against {len(udp_ports)} UDP ports...")
+
+        output = run_nmap_subprocess(
+            target=target,
+            args=f"-Pn -sU --script {scripts_str} -p {ports_str}",
+            output_dir=output_dir,
+            filename="04_udp_scripts.txt",
+            use_oA=USE_OA
+        )
+
+        for port in udp_ports:
+            svc_config = port_svc_map.get(port, {})
+            svc_name   = svc_config.get("name", "unknown")
+            results[port] = {
+                "service": svc_name,
+                "scripts": svc_config.get("scripts", ""),
+                "output":  output
+            }
+
+    # ── Handle unmapped ports with default scripts ────────
+    if unmapped:
+        ports_str = ",".join([str(p) for p in unmapped])
+        log(f"Running default scripts on unmapped ports: {ports_str}")
+        output = run_nmap_subprocess(
+            target=target,
+            args=f"-Pn -sCV --script default -p {ports_str}",
+            output_dir=output_dir,
+            filename="04_unmapped_default.txt",
+            use_oA=USE_OA
+        )
+        for port in unmapped:
+            results[port] = {
+                "service": "unknown",
+                "scripts": "default",
+                "output":  output
+            }
+
+    log(f"\nScript enumeration complete — {len(results)} ports scanned", "success")
     return results
 
 #  PHASE 5 — VULNERABILITY SCAN
@@ -1543,9 +1597,9 @@ def main():
     parser.add_argument("--skip-udp",
         action="store_true",
         help="Skip UDP scan")
-    parser.add_argument("--skip-vuln",
+    parser.add_argument("--vuln",
         action="store_true",
-        help="Skip vulnerability scan")
+        help="Run vulnerability scan (Phase 5) — disabled by default")
     parser.add_argument("--ports-only",
         action="store_true",
         help="Only perform port discovery — no scripts")
@@ -1627,9 +1681,9 @@ def main():
         # Phase 4 — Script Enumeration
         script_results = phase4_script_enumeration(target, open_ports, target_dir, services)
 
-        # Phase 5 — Vulnerability Scan
+        # Phase 5 — Vulnerability Scan (opt-in only)
         vuln_results = []
-        if not args.skip_vuln:
+        if args.vuln:
             vuln_results = phase5_vuln_scan(target, open_ports, target_dir)
 
         # Generate Report
