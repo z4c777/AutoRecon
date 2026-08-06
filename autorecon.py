@@ -768,6 +768,92 @@ SERVICE_SCRIPTS = {
     },
 }
 
+
+# ══════════════════════════════════════════════════════════
+#  SERVICE NAME -> SCRIPT MAPPING
+#  Allows script selection by detected service name
+#  so non-standard ports still get the right scripts
+#  e.g. FTP on port 2121 still runs ftp-* scripts
+# ══════════════════════════════════════════════════════════
+SERVICE_NAME_MAP = {
+    "ftp": 21, "ftp-data": 21,
+    "ssh": 22,
+    "telnet": 23,
+    "smtp": 25, "smtps": 465, "submission": 587,
+    "dns": 53, "domain": 53,
+    "http": 80, "http-alt": 8080, "http-proxy": 8080,
+    "https": 443, "https-alt": 8443,
+    "kerberos": 88, "kpasswd5": 88,
+    "pop3": 110, "pop3s": 995,
+    "rpc": 111, "sunrpc": 111,
+    "ident": 113, "auth": 113,
+    "imap": 143, "imaps": 993,
+    "snmp": 161,
+    "ldap": 389, "ldaps": 636,
+    "rsync": 873,
+    "msrpc": 135, "epmap": 135,
+    "netbios-ns": 137, "netbios-ssn": 139,
+    "smb": 445, "microsoft-ds": 445,
+    "mssql": 1433, "ms-sql-s": 1433,
+    "oracle": 1521, "oracle-tns": 1521,
+    "nfs": 2049,
+    "mysql": 3306,
+    "rdp": 3389, "ms-wbt-server": 3389,
+    "distcc": 3632,
+    "postgresql": 5432, "postgres": 5432,
+    "vnc": 5900, "rfb": 5900,
+    "wsman": 5985, "wsmans": 5986,
+    "jdwp": 5005,
+    "ipmi": 623, "asf-rmcp": 623,
+    "redis": 6379,
+    "irc": 6667,
+    "ajp": 8009, "ajp13": 8009,
+    "globalcatldap": 3268, "globalcatldaps": 3269,
+    "mongodb": 27017,
+    "memcached": 11211,
+    "couchdb": 5984,
+    "cassandra": 9042,
+    "elasticsearch": 9200,
+    "docker": 2375,
+    "rmi": 1099, "java-rmi": 1099,
+    "pptp": 1723,
+    "tftp": 69,
+    "ntp": 123,
+    "finger": 79,
+}
+
+
+def get_scripts_for_port(port, services):
+    """
+    Return correct script config for a port.
+    1. Check port number directly (standard ports)
+    2. Fall back to detected service name (non-standard ports)
+    3. Check product field as last resort
+    e.g. FTP on port 2121 will still get ftp-* scripts
+    """
+    # Direct port match
+    if port in SERVICE_SCRIPTS:
+        return SERVICE_SCRIPTS[port]
+
+    svc_data = services.get(port, {})
+    svc_name = svc_data.get('name', '').lower()
+    product  = svc_data.get('product', '').lower()
+
+    # Match by service name
+    if svc_name in SERVICE_NAME_MAP:
+        mapped_port = SERVICE_NAME_MAP[svc_name]
+        if mapped_port in SERVICE_SCRIPTS:
+            log(f"  [*] Port {port} non-standard — matched service '{svc_name}' to port {mapped_port} scripts")
+            return SERVICE_SCRIPTS[mapped_port]
+
+    # Match by product string
+    for keyword, mapped_port in SERVICE_NAME_MAP.items():
+        if keyword in product and mapped_port in SERVICE_SCRIPTS:
+            log(f"  [*] Port {port} non-standard — matched product '{product}' to port {mapped_port} scripts")
+            return SERVICE_SCRIPTS[mapped_port]
+
+    return None
+
 #  HELPERS
 # ══════════════════════════════════════════════════════════
 def banner():
@@ -949,25 +1035,30 @@ def phase3_udp_scan(target, output_dir):
 # ══════════════════════════════════════════════════════════
 #  PHASE 4 — TARGETED SCRIPT ENUMERATION
 # ══════════════════════════════════════════════════════════
-def phase4_script_enumeration(target, open_ports, output_dir):
+def phase4_script_enumeration(target, open_ports, output_dir, services=None):
     """
     For each open port run the appropriate NSE scripts.
-    Maps port number to script list from SERVICE_SCRIPTS.
+    Uses get_scripts_for_port() to match by port number first,
+    then by detected service name for non-standard ports.
+    e.g. FTP on port 2121 will still run ftp-* scripts.
     """
     log("PHASE 4 — Targeted NSE Script Enumeration", "section")
+
+    if services is None:
+        services = {}
 
     results = {}
 
     for port in open_ports:
-        if port in SERVICE_SCRIPTS:
-            svc = SERVICE_SCRIPTS[port]
-            svc_name = svc["name"]
-            scripts  = svc["scripts"]
-            extra    = svc["extra_args"]
+        svc_config = get_scripts_for_port(port, services)
+
+        if svc_config:
+            svc_name = svc_config["name"]
+            scripts  = svc_config["scripts"]
+            extra    = svc_config["extra_args"]
 
             log(f"\n[Port {port}] {svc_name} — Running scripts...")
 
-            # Build nmap command
             args = f"-Pn {extra} --script {scripts} -p {port}"
 
             output = run_nmap_subprocess(
@@ -995,7 +1086,7 @@ def phase4_script_enumeration(target, open_ports, output_dir):
                     log(f"  [INTERESTING] {line.strip()}", "warn")
 
         else:
-            log(f"[Port {port}] No specific scripts configured — running default scripts")
+            log(f"[Port {port}] No scripts matched — running default scripts")
             output = run_nmap_subprocess(
                 target=target,
                 args=f"-Pn -sCV --script default -p {port}",
@@ -1005,8 +1096,6 @@ def phase4_script_enumeration(target, open_ports, output_dir):
 
     return results
 
-
-# ══════════════════════════════════════════════════════════
 #  PHASE 5 — VULNERABILITY SCAN
 # ══════════════════════════════════════════════════════════
 def phase5_vuln_scan(target, open_ports, output_dir):
@@ -1219,7 +1308,7 @@ def main():
             phase3_udp_scan(target, target_dir)
 
         # Phase 4 — Script Enumeration
-        script_results = phase4_script_enumeration(target, open_ports, target_dir)
+        script_results = phase4_script_enumeration(target, open_ports, target_dir, services)
 
         # Phase 5 — Vulnerability Scan
         vuln_results = []
