@@ -1,8 +1,10 @@
-# AutoRecon 🔍
+# AutoRecon
 
-Automated Nmap enumeration for penetration testing. Point it at a target and it handles the rest — port discovery, service detection, targeted NSE scripts, and a clean summary report.
+Automated enumeration for penetration testing. Point it at a target and it handles the rest — port discovery, service detection, targeted NSE scripts, and a clean summary report.
 
-Built for HackTheBox CPTS and CTF engagements.
+Made for HackTheBox CTFs.
+
+Disclaimer: This tool was generated with AI.
 
 ---
 
@@ -226,17 +228,6 @@ Scripts are automatically selected based on the detected service — even on non
 
 ---
 
-## Smart Features
-
-### Non-Standard Port Detection
-If a service runs on an unusual port the script detects it by service name and applies the right scripts automatically.
-
-```
-FTP on port 2121  →  ftp-anon, ftp-vsftpd-backdoor etc
-HTTP on port 8888 →  Full HTTP script suite
-MySQL on port 3307 → mysql-info, mysql-dump-hashes etc
-```
-
 ### Post-Scan Tips
 After scanning each service actionable next steps are printed automatically. Example for IMAP:
 
@@ -247,30 +238,12 @@ After scanning each service actionable next steps are printed automatically. Exa
       Server: 10.129.98.84  Port: 143
 ```
 
-### Weak SSH Algorithm Detection
-`ssh2-enum-algos` runs against SSH but only flags deprecated algorithms:
-
-| Algorithm | Reason flagged |
-|-----------|---------------|
-| `arcfour` | RC4 — cryptographically broken |
-| `3des-cbc` | Sweet32 vulnerable |
-| `diffie-hellman-group1-sha1` | Logjam vulnerable |
-| `hmac-md5` | MD5 — broken |
-| `ssh-dss` | DSA — deprecated |
-
-Modern algorithms are silently skipped — no noise.
-
 ### Interesting Findings Filter
 The summary only shows genuinely actionable output:
 - Vulnerable findings
 - Anonymous login allowed
 - Credentials or password hashes
 - RCE indicators
-
-False positives filtered out:
-- SSH algorithm lists
-- `NOT VULNERABLE` lines
-- OpenSSH identifier strings
 
 ---
 
@@ -288,13 +261,3 @@ Add an entry to `SERVICE_SCRIPTS` in the script:
     "extra_args": ""   # e.g. "-sU" for UDP services
 },
 ```
-
-## Disclaimer
-
-For authorized penetration testing and CTF environments only.
-
----
-
-## License
-
-MIT
