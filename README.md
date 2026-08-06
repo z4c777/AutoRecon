@@ -147,6 +147,7 @@ VULNERABILITIES FOUND
 
 Scripts are automatically selected based on the detected service — even on non-standard ports. For example FTP running on port 2121 still gets FTP scripts.
 
+Example NSE scripts used:
 ### Network
 
 | Port | Service | Key Scripts |
@@ -160,18 +161,6 @@ Scripts are automatically selected based on the detected service — even on non
 | 111 | RPC | rpcinfo, nfs-showmount |
 | 123 | NTP (UDP) | ntp-info, ntp-monlist |
 | 873 | rsync | rsync-list-modules |
-
-### Mail
-
-| Port | Service | Key Scripts |
-|------|---------|-------------|
-| 25 | SMTP | smtp-commands, smtp-enum-users, smtp-open-relay, smtp-vuln-* |
-| 110 | POP3 | pop3-capabilities, pop3-ntlm-info |
-| 143 | IMAP | imap-capabilities, imap-ntlm-info |
-| 465 | SMTPS | smtp-commands, smtp-enum-users |
-| 587 | Submission | smtp-commands, smtp-open-relay |
-| 993 | IMAPS | imap-capabilities, ssl-cert |
-| 995 | POP3S | pop3-capabilities, ssl-cert |
 
 ### Web
 
@@ -196,35 +185,6 @@ Scripts are automatically selected based on the detected service — even on non
 | 3268 | Global Catalog | ldap-rootdse, ldap-search |
 | 3389 | RDP | rdp-enum-encryption, rdp-ntlm-info, rdp-vuln-ms12-020 |
 | 5985 | WinRM | http-auth-finder, http-ntlm-info |
-
-### Databases
-
-| Port | Service | Key Scripts |
-|------|---------|-------------|
-| 1433 | MSSQL | ms-sql-info, ms-sql-empty-password, ms-sql-xp-cmdshell |
-| 1521 | Oracle | oracle-tns-version, oracle-sid-brute |
-| 3306 | MySQL | mysql-info, mysql-empty-password, mysql-dump-hashes |
-| 5432 | PostgreSQL | pgsql-brute |
-| 6379 | Redis | redis-info |
-| 27017 | MongoDB | mongodb-info, mongodb-databases |
-| 5984 | CouchDB | couchdb-databases, couchdb-stats |
-| 9200 | Elasticsearch | http-title, http-methods |
-| 11211 | Memcached | memcached-info |
-
-### Infrastructure / Dev
-
-| Port | Service | Key Scripts |
-|------|---------|-------------|
-| 161 | SNMP (UDP) | snmp-info, snmp-processes, snmp-win32-users, snmp-win32-shares |
-| 623 | IPMI (UDP) | ipmi-version, ipmi-cipher-zero |
-| 1099 | RMI | rmi-dumpregistry, rmi-vuln-classloader |
-| 2049 | NFS | nfs-showmount, nfs-ls, nfs-statfs |
-| 2375 | Docker | docker-version |
-| 3632 | distcc | distcc-cve2004-2687 (RCE) |
-| 5005 | JDWP | jdwp-exec, jdwp-info, jdwp-inject (RCE) |
-| 5900 | VNC | vnc-info, realvnc-auth-bypass |
-| 6667 | IRC | irc-unrealircd-backdoor |
-| 9042 | Cassandra | cassandra-info |
 
 ---
 
