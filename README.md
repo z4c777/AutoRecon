@@ -17,6 +17,7 @@ pip install python-nmap
 ```
 
 # Run
+```
 python3 autorecon.py -t 10.129.98.84
 ```
 Within 30 seconds you will see all open ports on the machine in your terminal output.  
