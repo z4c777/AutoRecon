@@ -1023,6 +1023,157 @@ def run_nmap_subprocess(target, args, output_dir, filename, use_oA=False):
 # ══════════════════════════════════════════════════════════
 #  PHASE 1 — PORT DISCOVERY
 # ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+#  PHASE 0 — DNS ENUMERATION
+# ══════════════════════════════════════════════════════════
+def phase0_dns_enumeration(target, output_dir, domain=None):
+    """
+    Dedicated DNS enumeration phase — runs before port scanning.
+    Attempts standard record lookups, zone transfer via dig,
+    and tries all discovered nameservers for AXFR.
+    Requires --domain flag or a hostname target for best results.
+    """
+    import subprocess as sp
+
+    log("PHASE 0 — DNS Enumeration", "section")
+
+    def _is_ip(addr):
+        import socket
+        try:
+            socket.inet_aton(addr.split("/")[0])
+            return True
+        except socket.error:
+            return False
+
+    # Derive domain if not provided
+    if not domain:
+        if not _is_ip(target):
+            # Target is already a hostname — extract domain
+            parts = target.rstrip(".").split(".")
+            domain = ".".join(parts[-2:]) if len(parts) >= 2 else target
+            log(f"Derived domain from target: {domain}")
+        else:
+            # Try reverse DNS to find domain
+            log("No domain provided — attempting reverse DNS lookup...")
+            try:
+                rev = sp.run(
+                    ["dig", "-x", target, "+short"],
+                    capture_output=True, text=True, timeout=10
+                )
+                hostname = rev.stdout.strip().rstrip(".")
+                if hostname:
+                    parts = hostname.split(".")
+                    domain = ".".join(parts[-2:]) if len(parts) >= 2 else hostname
+                    log(f"Derived domain from reverse DNS: {domain}")
+                else:
+                    log("Reverse DNS returned no result", "warn")
+                    log("Use --domain DOMAIN.local to enable DNS enumeration", "warn")
+                    return {}
+            except Exception as e:
+                log(f"Reverse DNS failed: {e}", "warn")
+                log("Use --domain DOMAIN.local to enable DNS enumeration", "warn")
+                return {}
+
+    log(f"Target:  {target}")
+    log(f"Domain:  {domain}")
+
+    results  = {}
+    dns_log  = []
+
+    # ── Standard record enumeration ──────────────────────
+    log("\nEnumerating DNS records...")
+    record_types = ["A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME", "SRV"]
+
+    for rtype in record_types:
+        try:
+            cmd = ["dig", rtype, domain, f"@{target}", "+noall", "+answer"]
+            result = sp.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.stdout.strip():
+                results[rtype] = result.stdout.strip()
+                dns_log.append(f"[{rtype}]\n{result.stdout.strip()}\n")
+                for line in result.stdout.strip().split("\n"):
+                    log(f"  [{rtype}] {line}", "success")
+            else:
+                log(f"  [{rtype}] No records found")
+        except sp.TimeoutExpired:
+            log(f"  [{rtype}] Timed out", "warn")
+        except Exception as e:
+            log(f"  [{rtype}] Error: {e}", "warn")
+
+    # ── Collect nameservers for AXFR attempts ─────────────
+    nameservers = [target]  # Always try the target first
+
+    if "NS" in results:
+        for line in results["NS"].split("\n"):
+            parts = line.split()
+            if parts:
+                ns = parts[-1].rstrip(".")
+                if ns and ns not in nameservers:
+                    nameservers.append(ns)
+                    log(f"  Found nameserver: {ns}")
+
+    # ── Zone transfer attempts ────────────────────────────
+    log(f"\nAttempting zone transfer (AXFR) for {domain}...")
+    axfr_success = False
+
+    for ns in nameservers:
+        log(f"  Trying AXFR via {ns}...")
+        try:
+            axfr = sp.run(
+                ["dig", "axfr", domain, f"@{ns}"],
+                capture_output=True, text=True, timeout=30
+            )
+
+            output = axfr.stdout
+
+            if "XFR size" in output:
+                log(f"ZONE TRANSFER SUCCESSFUL via {ns}", "success")
+                log("All DNS records exposed:", "success")
+                print(f"\n{output}")
+
+                results[f"axfr_{ns}"] = output
+                dns_log.append(f"[AXFR via {ns} — SUCCESS]\n{output}\n")
+
+                safe_ns = ns.replace(".", "_")
+                save_output(output_dir, f"00_dns_axfr_{safe_ns}.txt", output)
+                axfr_success = True
+
+            elif "Transfer failed" in output or "REFUSED" in output:
+                log(f"  Zone transfer refused by {ns}", "warn")
+                dns_log.append(f"[AXFR via {ns} — REFUSED]\n")
+
+            elif "connection timed out" in output or not output.strip():
+                log(f"  Zone transfer timed out via {ns}", "warn")
+
+            else:
+                log(f"  Zone transfer returned no records via {ns}", "warn")
+                dns_log.append(f"[AXFR via {ns} — NO RECORDS]\n{output}\n")
+
+        except sp.TimeoutExpired:
+            log(f"  Zone transfer timed out via {ns}", "warn")
+        except Exception as e:
+            log(f"  Zone transfer error via {ns}: {e}", "warn")
+
+    if not axfr_success:
+        log("Zone transfer failed on all nameservers — server is properly configured", "warn")
+
+    # ── Subdomain brute force hint ────────────────────────
+    log(f"\n[TIP] Run subdomain brute force manually for deeper coverage:")
+    log(f"      dnsrecon -d {domain} -t brt -D /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt")
+    log(f"      dnsx -d {domain} -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp")
+
+    # ── Save all results ──────────────────────────────────
+    full_output = f"DNS Enumeration — {domain}\n"
+    full_output += f"Target: {target}\n"
+    full_output += f"{'='*60}\n\n"
+    full_output += "\n".join(dns_log)
+
+    save_output(output_dir, "00_dns_enum.txt", full_output)
+    log(f"\nDNS enumeration complete — saved to 00_dns_enum.txt", "success")
+
+    return results
+
+
 def phase1_port_discovery(target, output_dir):
     """Fast TCP port discovery — find all open ports quickly."""
     log("PHASE 1 — Fast TCP Port Discovery", "section")
@@ -1708,6 +1859,9 @@ def main():
     parser.add_argument("--ports-only",
         action="store_true",
         help="Only perform port discovery — no scripts")
+    parser.add_argument("--domain", "-d",
+        default=None,
+        help="Domain name for DNS enumeration and zone transfer (e.g. inlanefreight.local)")
     parser.add_argument("--oA",
         action="store_true",
         help="Save nmap output in all formats (.nmap .gnmap .xml) in addition to .txt")
@@ -1744,6 +1898,14 @@ def main():
     log(f"Output directory: {output_dir}")
 
     targets = [args.target]
+
+    # Phase 0 — DNS Enumeration (runs before port scan)
+    if args.domain or (not args.sweep and '/' not in args.target):
+        phase0_dns_enumeration(
+            target=args.target,
+            output_dir=output_dir,
+            domain=args.domain
+        )
 
     # Reachability check — skip for subnets (sweep handles that)
     if '/' not in args.target:
