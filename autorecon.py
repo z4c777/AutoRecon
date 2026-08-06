@@ -168,7 +168,6 @@ SERVICE_SCRIPTS = {
     111: {
         "name": "RPC",
         "scripts": ",".join([
-            "rpcinfo",
             "nfs-showmount",
         ]),
         "extra_args": ""
@@ -1305,6 +1304,252 @@ def phase3_udp_scan(target, output_dir):
 # ══════════════════════════════════════════════════════════
 #  PHASE 4 — TARGETED SCRIPT ENUMERATION
 # ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+#  SSH DEFAULT CREDENTIAL CHECK
+# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+#  SMTP USER ENUMERATION
+# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+#  RPCINFO EXECUTION
+# ══════════════════════════════════════════════════════════
+def run_rpcinfo(target, port, output_dir):
+    """
+    Run rpcinfo binary against target when RPC port 111 is found.
+    Reveals registered RPC services — NFS, NIS, mountd etc.
+    """
+    import subprocess as sp
+    import shutil
+
+    log(f"\n[Port {port}] Running rpcinfo against {target}...")
+
+    # Check rpcinfo is installed
+    if not shutil.which("rpcinfo"):
+        log("  rpcinfo not found — install with: sudo apt install rpcbind", "warn")
+        log(f"  Manual check: rpcinfo -p {target}", "warn")
+        return
+
+    try:
+        result = sp.run(
+            ["rpcinfo", "-p", target],
+            capture_output=True, text=True, timeout=30
+        )
+
+        output = result.stdout
+
+        if result.returncode != 0 or not output.strip():
+            log(f"  rpcinfo returned no results — host may be filtering port {port}", "warn")
+            if result.stderr:
+                log(f"  Error: {result.stderr.strip()}", "warn")
+            return
+
+        # Display output
+        log(f"  rpcinfo output:", "success")
+        for line in output.strip().split("\n"):
+            log(f"    {line}")
+
+        # Save to file
+        save_output(output_dir, f"04_{port}_rpcinfo.txt", output)
+        log(f"  Saved to: 04_{port}_rpcinfo.txt", "success")
+
+        # Flag interesting services
+        interesting = ["nfs", "mountd", "nlockmgr", "nis", "yp", "portmapper"]
+        found_services = []
+        for line in output.lower().split("\n"):
+            for svc in interesting:
+                if svc in line and svc not in found_services:
+                    found_services.append(svc)
+
+        if "nfs" in found_services or "mountd" in found_services:
+            log(f"\n  [!] NFS/mountd detected — check for accessible shares:", "warn")
+            log(f"      showmount -e {target}")
+            log(f"      mount -t nfs {target}:/SHARE /mnt/nfs -o nolock")
+
+        if "nis" in found_services or "yp" in found_services:
+            log(f"\n  [!] NIS/YP detected — may expose user/password maps:", "warn")
+            log(f"      ypwhich -d DOMAIN")
+            log(f"      ypcat -d DOMAIN passwd.byname")
+
+    except sp.TimeoutExpired:
+        log(f"  rpcinfo timed out after 30 seconds", "warn")
+    except Exception as e:
+        log(f"  rpcinfo error: {e}", "error")
+
+
+def check_smtp_users(target, port=25):
+    """
+    Enumerate valid SMTP users via VRFY command.
+    A 252 response = user exists.
+    A 550 response = user does not exist.
+    """
+    import socket
+
+    COMMON_USERS = [
+        "root", "admin", "administrator", "www-data",
+        "mail", "postmaster", "daemon", "ftp",
+        "nobody", "info", "test", "guest",
+        "user", "ubuntu", "apache", "mysql",
+        "support", "helpdesk", "sales", "contact",
+        "webmaster", "hostmaster", "abuse",
+        "noreply", "no-reply", "office",
+    ]
+
+    log(f"\n[Port {port}] Enumerating SMTP users via VRFY...")
+
+    valid_users = []
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        sock.connect((target, port))
+
+        # Read banner
+        banner = sock.recv(1024).decode('utf-8', errors='ignore').strip()
+        log(f"  Banner: {banner}")
+
+        # Send EHLO
+        sock.send(b"EHLO autorecon\r\n")
+        sock.recv(1024)
+
+        # Try VRFY for each user
+        for user in COMMON_USERS:
+            try:
+                sock.send(f"VRFY {user}\r\n".encode())
+                response = sock.recv(1024).decode('utf-8', errors='ignore').strip()
+
+                # 252 = user exists (cannot verify but will accept)
+                # 250 = user exists and verified
+                # 550 = user does not exist
+                # 551, 553 = user does not exist
+                if response.startswith("252") or response.startswith("250"):
+                    log(f"  [VALID USER] {user} — {response}", "success")
+                    valid_users.append(user)
+                elif response.startswith("550") or response.startswith("551") or response.startswith("553"):
+                    log(f"  [-] {user} — not found")
+                elif response.startswith("502") or response.startswith("500"):
+                    log(f"  VRFY command disabled on this server", "warn")
+                    break
+                else:
+                    log(f"  [?] {user} — {response}")
+
+            except socket.timeout:
+                log(f"  Timeout on user {user}", "warn")
+                break
+            except Exception as e:
+                log(f"  Error checking {user}: {e}", "warn")
+                break
+
+        # Send QUIT
+        try:
+            sock.send(b"QUIT\r\n")
+        except Exception:
+            pass
+        sock.close()
+
+    except ConnectionRefusedError:
+        log(f"  SMTP port {port} connection refused on {target}", "error")
+        return []
+    except socket.timeout:
+        log(f"  Connection to {target}:{port} timed out", "error")
+        return []
+    except Exception as e:
+        log(f"  SMTP enum error: {e}", "error")
+        return []
+
+    if valid_users:
+        log(f"\n  [!] Found {len(valid_users)} valid SMTP user(s): {valid_users}", "warn")
+        log(f"  [TIP] Use valid users for password spraying:")
+        log(f"      hydra -L valid_users.txt -P /usr/share/seclists/Passwords/Common-Credentials/10-million-password-list-top-100.txt {target} ssh")
+    else:
+        log(f"  No valid users found or VRFY disabled")
+
+    return valid_users
+
+
+def check_ssh_default_creds(target, port=22):
+    """
+    Try a small set of common default SSH credentials.
+    Uses paramiko if available, falls back to tip-only if not.
+    Not a brute force — just quick sanity check for weak creds.
+    """
+    DEFAULT_CREDS = [
+        ("admin",    "admin"),
+        ("root",     "toor"),
+        ("admin",    "Welcome"),
+        ("admin",    "Pass123"),
+        ("root",     "root"),
+        ("admin",    "password"),
+        ("root",     "password"),
+        ("admin",    "admin123"),
+        ("user",     "user"),
+        ("ubuntu",   "ubuntu"),
+        ("guest",    "guest"),
+    ]
+
+    log(f"\n[Port {port}] Checking default SSH credentials...")
+
+    try:
+        import paramiko
+    except ImportError:
+        log("  paramiko not installed — skipping SSH credential check", "warn")
+        log("  Install with: pip install paramiko", "warn")
+        return []
+
+    found = []
+
+    for username, password in DEFAULT_CREDS:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(
+                hostname=target,
+                port=port,
+                username=username,
+                password=password,
+                timeout=5,
+                banner_timeout=5,
+                auth_timeout=5,
+                look_for_keys=False,
+                allow_agent=False
+            )
+            # Login succeeded
+            log(f"  [VALID CREDS] {username}:{password}", "warn")
+            found.append((username, password))
+            client.close()
+
+        except paramiko.AuthenticationException:
+            # Wrong password — expected
+            pass
+        except paramiko.ssh_exception.NoValidConnectionsError:
+            log(f"  SSH port {port} not reachable on {target}", "error")
+            break
+        except Exception as e:
+            err = str(e).lower()
+            if "connection refused" in err:
+                log(f"  Connection refused on port {port}", "error")
+                break
+            elif "timed out" in err or "timeout" in err:
+                log(f"  Connection timed out — skipping remaining checks", "warn")
+                break
+            else:
+                # Auth method not supported etc — skip silently
+                pass
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    if found:
+        log(f"  [!] {len(found)} default credential(s) worked:", "warn")
+        for user, passwd in found:
+            log(f"      ssh {user}@{target} (password: {passwd})", "warn")
+    else:
+        log(f"  No default credentials worked on port {port}")
+
+    return found
+
+
 def post_scan_tips(port, svc_name, target):
     """
     Print actionable next step tips after each service is scanned.
@@ -1539,43 +1784,66 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
             use_oA=USE_OA
         )
 
-        # Store output for each port and highlight findings
+        # Store output for each port
         for port in tcp_ports:
             svc_config = port_svc_map.get(port, {})
             svc_name   = svc_config.get("name", "unknown")
-
             results[port] = {
                 "service": svc_name,
                 "scripts": svc_config.get("scripts", ""),
                 "output":  output
             }
 
-            # Highlight interesting findings
-            for line in output.split('\n'):
-                if "@openssh.com" in line:
-                    weak_algos = ["arcfour", "blowfish-cbc", "3des-cbc",
-                                  "diffie-hellman-group1-sha1",
-                                  "diffie-hellman-group14-sha1",
-                                  "hmac-md5", "ssh-dss"]
-                    if any(w in line for w in weak_algos):
-                        log(f"  [WEAK ALGO] {line.strip()}", "warn")
-                    continue
-                if "NOT VULNERABLE" in line or "not vulnerable" in line:
-                    continue
-                weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
-                if any(w in line for w in weak_standalone):
+        # Highlight interesting findings ONCE — not per port
+        log("\nInteresting findings:")
+        seen = set()
+        for line in output.split('\n'):
+            if line.strip() in seen:
+                continue
+            seen.add(line.strip())
+            if "@openssh.com" in line:
+                weak_algos = ["arcfour", "blowfish-cbc", "3des-cbc",
+                              "diffie-hellman-group1-sha1",
+                              "diffie-hellman-group14-sha1",
+                              "hmac-md5", "ssh-dss"]
+                if any(w in line for w in weak_algos):
                     log(f"  [WEAK ALGO] {line.strip()}", "warn")
-                keywords = ["VULNERABLE", "vulnerable", "CVE-",
-                            "Anonymous", "anonymous", "password:",
-                            "credential", "admin", "root",
-                            "ERROR", "open", "uid=", "id="]
-                if any(kw in line for kw in keywords):
-                    log(f"  [INTERESTING] {line.strip()}", "warn")
+                continue
+            if "NOT VULNERABLE" in line or "not vulnerable" in line:
+                continue
+            weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
+            if any(w in line for w in weak_standalone):
+                log(f"  [WEAK ALGO] {line.strip()}", "warn")
+            # Skip port header lines e.g. "21/tcp  open  ftp"
+            if line.strip() and line[0].isdigit() and "/tcp" in line:
+                continue
+            keywords = [
+                "VULNERABLE", "vulnerable", "CVE-",
+                "Anonymous FTP", "anonymous login",
+                "login allowed",
+                "password:", "credential",
+                "root:", "uid=", "id=",
+                "No auth", "WRITABLE", "READ/WRITE",
+            ]
+            if any(kw in line for kw in keywords):
+                log(f"  [INTERESTING] {line.strip()}", "warn")
 
-        # Post-scan tips for all TCP services
+        # Post-scan tips and default cred checks for all TCP services
         for port in tcp_ports:
             svc_name = port_svc_map.get(port, {}).get("name", "")
             post_scan_tips(port, svc_name, target)
+
+            # SSH default credential check
+            if svc_name == "SSH" or port == 22:
+                check_ssh_default_creds(target, port)
+
+            # SMTP user enumeration via VRFY
+            if svc_name == "SMTP" or port in [25, 465, 587]:
+                check_smtp_users(target, port)
+
+            # RPC — run rpcinfo binary directly
+            if svc_name in ["RPC", "rpcbind"] or port == 111:
+                run_rpcinfo(target, port, output_dir)
 
     # ── Run UDP scripts separately ────────────────────────
     if udp_ports and udp_scripts:
@@ -1693,6 +1961,190 @@ def host_sweep(target, output_dir):
 # ══════════════════════════════════════════════════════════
 #  SUMMARY REPORT
 # ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+#  PHASE 6 — VHOST DISCOVERY
+# ══════════════════════════════════════════════════════════
+def phase6_vhost_discovery(target, output_dir, domain, ports=None, custom_wordlist=None):
+    """
+    Virtual host discovery using ffuf.
+    Uses Content-Length of an invalid vhost as baseline filter
+    to find valid vhosts returning different response sizes.
+    Requires ffuf to be installed and --domain to be set.
+    """
+    import subprocess as sp
+    import shutil
+
+    log("PHASE 6 — Vhost Discovery", "section")
+
+    # Check ffuf is installed
+    if not shutil.which("ffuf"):
+        log("ffuf not found — install with: sudo apt install ffuf", "error")
+        log("Or download from: https://github.com/ffuf/ffuf/releases", "error")
+        log("Skipping vhost discovery", "warn")
+        return {}
+
+    if not domain:
+        log("No domain set — use --domain DOMAIN.local to enable vhost discovery", "warn")
+        return {}
+
+    # Check wordlist exists
+    if custom_wordlist:
+        if os.path.exists(custom_wordlist):
+            wordlist = custom_wordlist
+            log(f"Using custom wordlist: {wordlist}")
+        else:
+            log(f"Custom wordlist not found: {custom_wordlist}", "error")
+            log("Skipping vhost discovery", "warn")
+            return {}
+    else:
+        default_wordlists = [
+            "/usr/share/seclists/Discovery/DNS/namelist.txt",
+            "/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+            "/usr/share/wordlists/seclists/Discovery/DNS/namelist.txt",
+            "/opt/useful/SecLists/Discovery/DNS/namelist.txt",
+        ]
+        wordlist = None
+        for wl in default_wordlists:
+            if os.path.exists(wl):
+                wordlist = wl
+                break
+
+        if not wordlist:
+            log("No wordlist found — checked:", "error")
+            for wl in default_wordlists:
+                log(f"  {wl}", "error")
+            log("Install seclists: sudo apt install seclists", "error")
+            log("Or specify a custom wordlist: --vhost-wordlist /path/to/wordlist.txt", "error")
+            log("Skipping vhost discovery", "warn")
+            return {}
+
+    log(f"Target:    {target}")
+    log(f"Domain:    {domain}")
+    log(f"Wordlist:  {wordlist}")
+
+    # Determine which HTTP ports to check
+    http_ports = ports if ports else [80, 443, 8080, 8443]
+    results = {}
+
+    for port in http_ports:
+        proto = "https" if port in [443, 8443] else "http"
+        url   = f"{proto}://{target}:{port}/" if port not in [80, 443] else f"{proto}://{target}/"
+
+        log(f"\n[Port {port}] Checking vhosts on {url}...")
+
+        # Step 1 — Get baseline Content-Length for invalid vhost
+        log("  Getting baseline Content-Length for invalid vhost...")
+        try:
+            baseline_cmd = [
+                "curl", "-s", "-I",
+                "-H", f"Host: defnotvalid.{domain}",
+                "--connect-timeout", "5",
+                "-m", "10",
+            ]
+            if proto == "https":
+                baseline_cmd.append("-k")
+            baseline_cmd.append(url)
+
+            baseline = sp.run(
+                baseline_cmd,
+                capture_output=True, text=True, timeout=15
+            )
+
+            # Extract Content-Length
+            baseline_size = None
+            for line in baseline.stdout.split("\n"):
+                if "content-length:" in line.lower():
+                    baseline_size = line.split(":")[-1].strip()
+                    break
+
+            if not baseline_size:
+                log(f"  Could not get baseline Content-Length for port {port} — skipping", "warn")
+                log(f"  Server may not be running on port {port}", "warn")
+                continue
+
+            log(f"  Baseline Content-Length: {baseline_size} (invalid vhost response)")
+
+        except sp.TimeoutExpired:
+            log(f"  Baseline check timed out on port {port} — skipping", "warn")
+            continue
+        except Exception as e:
+            log(f"  Baseline check error on port {port}: {e}", "warn")
+            continue
+
+        # Step 2 — Run ffuf with baseline filter
+        log(f"  Running ffuf against {url} filtering size {baseline_size}...")
+
+        output_file = os.path.join(output_dir, f"06_vhosts_port{port}.txt")
+
+        ffuf_cmd = [
+            "ffuf",
+            "-w", f"{wordlist}:FUZZ",
+            "-u", url,
+            "-H", f"Host: FUZZ.{domain}",
+            "-fs", baseline_size,
+            "-o", output_file,
+            "-of", "csv",
+            "-t", "50",
+            "-timeout", "10",
+            "-mc", "all",
+            "-ac",
+        ]
+
+        if proto == "https":
+            ffuf_cmd.extend(["-k"])
+
+        try:
+            log(f"  Command: {' '.join(ffuf_cmd)}")
+            ffuf_result = sp.run(
+                ffuf_cmd,
+                capture_output=True, text=True, timeout=300
+            )
+
+            # Parse ffuf output for found vhosts
+            found_vhosts = []
+            for line in ffuf_result.stdout.split("\n"):
+                if "[Status:" in line or "200" in line or "301" in line or "302" in line:
+                    found_vhosts.append(line.strip())
+
+            # Also check CSV output file
+            if os.path.exists(output_file):
+                with open(output_file) as f:
+                    csv_content = f.read()
+                for line in csv_content.split("\n")[1:]:  # Skip header
+                    if line.strip() and not line.startswith("url,"):
+                        parts = line.split(",")
+                        if len(parts) >= 4:
+                            vhost    = parts[0].strip()
+                            status   = parts[1].strip() if len(parts) > 1 else ""
+                            length   = parts[2].strip() if len(parts) > 2 else ""
+                            if vhost and vhost != baseline_size:
+                                found_vhosts.append(f"{vhost}.{domain} [{status}] size:{length}")
+
+            if found_vhosts:
+                log(f"  [!] Found {len(found_vhosts)} vhost(s) on port {port}:", "success")
+                for vhost in found_vhosts:
+                    log(f"      {vhost}", "success")
+                results[port] = found_vhosts
+
+                # Print /etc/hosts tip
+                log(f"\n  [TIP] Add discovered vhosts to /etc/hosts:")
+                for vhost in found_vhosts:
+                    vhost_name = vhost.split()[0] if vhost else ""
+                    if vhost_name:
+                        log(f"      echo '{target}  {vhost_name}' >> /etc/hosts")
+            else:
+                log(f"  No vhosts found on port {port} with wordlist {os.path.basename(wordlist)}")
+                log(f"  Try a larger wordlist: /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt")
+
+        except sp.TimeoutExpired:
+            log(f"  ffuf timed out on port {port} after 5 minutes", "warn")
+        except Exception as e:
+            log(f"  ffuf error on port {port}: {e}", "error")
+
+    log("\nVhost discovery complete", "success")
+    return results
+
+
 def generate_report(target, open_ports, services, script_results, vuln_results, output_dir):
     """Generate a summary report of all findings."""
     log("Generating Summary Report", "section")
@@ -1790,11 +2242,11 @@ def generate_report(target, open_ports, services, script_results, vuln_results, 
                 found.append(f"[WEAK ALGO] {line.strip()}")
             keywords = [
                 "VULNERABLE", "vulnerable", "CVE-",
-                "Anonymous login", "anonymous login",
+                "Anonymous FTP", "anonymous login",
+                "login allowed",
                 "password:", "credential",
                 "root:", "uid=", "id=",
-                "WRITABLE", "No authentication",
-                "READ/WRITE",
+                "No auth", "WRITABLE", "READ/WRITE",
             ]
             if any(kw in line for kw in keywords):
                 found.append(line.strip())
@@ -1862,6 +2314,12 @@ def main():
     parser.add_argument("--domain", "-d",
         default=None,
         help="Domain name for DNS enumeration and zone transfer (e.g. inlanefreight.local)")
+    parser.add_argument("--vhost",
+        action="store_true",
+        help="Run vhost discovery using ffuf (requires --domain)")
+    parser.add_argument("--vhost-wordlist",
+        default=None,
+        help="Custom wordlist for vhost discovery (overrides default seclists path)")
     parser.add_argument("--oA",
         action="store_true",
         help="Save nmap output in all formats (.nmap .gnmap .xml) in addition to .txt")
@@ -1963,6 +2421,20 @@ def main():
         vuln_results = []
         if args.vuln:
             vuln_results = phase5_vuln_scan(target, open_ports, target_dir)
+
+        # Phase 6 — Vhost Discovery
+        if args.vhost:
+            if args.domain:
+                http_ports = [p for p in open_ports if p in [80, 443, 8080, 8443]]
+                phase6_vhost_discovery(
+                    target=target,
+                    output_dir=target_dir,
+                    domain=args.domain,
+                    ports=http_ports if http_ports else [80],
+                    custom_wordlist=args.vhost_wordlist
+                )
+            else:
+                log("--vhost requires --domain to be set e.g. --domain inlanefreight.local", "warn")
 
         # Generate Report
         generate_report(
