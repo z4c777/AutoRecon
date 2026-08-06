@@ -47,7 +47,7 @@ python3 autorecon.py -t TARGET [options]
 | `-o` | Custom output directory |
 | `--sweep` | Ping sweep subnet first, scan each live host |
 | `--skip-udp` | Skip UDP scan |
-| `--skip-vuln` | Skip vulnerability scan |
+| `--vuln` | Run vulnerability scan — disabled by default |
 | `--ports-only` | Port discovery only — no scripts |
 | `--oA` | Save nmap output in all formats (.nmap .gnmap .xml) |
 
@@ -60,8 +60,11 @@ python3 autorecon.py -t 10.129.98.84
 # Subnet — discover and scan all live hosts
 python3 autorecon.py -t 10.129.1.0/24 --sweep
 
-# Fast scan — skip UDP and vuln scan
-python3 autorecon.py -t 10.129.98.84 --skip-udp --skip-vuln
+# Fast scan — skip UDP scan
+python3 autorecon.py -t 10.129.98.84 --skip-udp
+
+# Include vulnerability scan
+python3 autorecon.py -t 10.129.98.84 --vuln
 
 # Save nmap output in all formats
 python3 autorecon.py -t 10.129.98.84 --oA
@@ -80,9 +83,11 @@ The scan runs in 5 phases:
 Phase 1  Fast TCP port discovery    nmap -p- --min-rate 5000
 Phase 2  Service detection          nmap -sCV on open ports only
 Phase 3  UDP scan                   nmap -sU --top-ports 100
-Phase 4  NSE script enumeration     Targeted scripts per service
-Phase 5  Vulnerability scan         nmap --script 'vuln and safe'
+Phase 4  NSE script enumeration     All scripts in ONE nmap call (TCP + UDP)
+Phase 5  Vulnerability scan         nmap --script 'vuln and safe' (opt-in via --vuln)
 ```
+
+Phase 4 combines all scripts for all open ports into a single nmap command instead of running one command per port — cuts scan time from ~10 minutes to ~2-3 minutes on a typical machine.
 
 ---
 
@@ -293,11 +298,16 @@ Add an entry to `SERVICE_SCRIPTS` in the script:
 
 ### v2.0
 
+**Performance**
+- Phase 4 now runs all scripts in a single nmap command — ~10 min → ~2-3 min per host
+- Removed duplicate python-nmap scan in Phase 2 — output parsed directly from subprocess
+- Phase 5 vulnerability scan is now opt-in via `--vuln` — disabled by default
+
 **Output**
-- Folder name now includes target IP and timestamp — `autorecon_10.129.98.84_20260805_224943`
+- Folder name includes target IP and timestamp — `autorecon_10.129.98.84_20260805_224943`
 - `--oA` flag saves nmap output in all three formats alongside `.txt`
-- Summary report shows nmap-style script output per port — no more flat port list
-- Report no longer lists every script that ran — shows actionable findings only
+- Summary report shows nmap-style script output per port
+- Report no longer lists every script that ran — actionable findings only
 
 **Script Selection**
 - Non-standard port detection — scripts matched by service name if port not in standard mapping
@@ -309,7 +319,7 @@ Add an entry to `SERVICE_SCRIPTS` in the script:
 - `@openssh.com` algorithm lines no longer flagged as interesting
 - `NOT VULNERABLE` lines excluded from interesting findings
 - `password` keyword tightened to `password:` — no longer matches SSH auth method listings
-- Weak SSH algorithms flagged separately as `[WEAK ALGO]` — modern algorithms silently skipped
+- SSH algorithm output filtered from report — weak algorithms still flagged as `[WEAK ALGO]`
 
 **SSH**
 - `ssh2-enum-algos` retained but only flags deprecated algorithms:
@@ -324,7 +334,6 @@ Add an entry to `SERVICE_SCRIPTS` in the script:
 - `http-useragent-tester` — noise, no pentest value
 - `http-bigip-cookie` — F5 only, irrelevant on HTB/CPTS
 - `http-cross-domain-policy` — Flash is dead
-- `ssh2-enum-algos` full output — replaced with weak algo detection only
 
 ### v1.0
 - Initial release with 40 service mappings
