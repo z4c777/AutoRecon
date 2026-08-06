@@ -1035,6 +1035,188 @@ def phase3_udp_scan(target, output_dir):
 # ══════════════════════════════════════════════════════════
 #  PHASE 4 — TARGETED SCRIPT ENUMERATION
 # ══════════════════════════════════════════════════════════
+def post_scan_tips(port, svc_name, target):
+    """
+    Print actionable next step tips after each service is scanned.
+    Reminds operator of manual follow-up steps the script can't automate.
+    """
+    tips = {
+        # IMAP
+        "IMAP": [
+            f"{YELLOW}[TIP] IMAP found — if on a Linux host try Evolution mail client:{RESET}",
+            f"      sudo apt install evolution",
+            f"      Launch Evolution → New Account → IMAP",
+            f"      Server: {target}  Port: 143  SSL: None/STARTTLS",
+            f"      Use any credentials found during enumeration",
+            f"      Evolution lets you browse mailboxes interactively",
+        ],
+        "IMAPS": [
+            f"{YELLOW}[TIP] IMAPS found — try Evolution mail client:{RESET}",
+            f"      sudo apt install evolution",
+            f"      Launch Evolution → New Account → IMAP",
+            f"      Server: {target}  Port: 993  SSL: SSL/TLS",
+            f"      Use any credentials found during enumeration",
+        ],
+        # POP3
+        "POP3": [
+            f"{YELLOW}[TIP] POP3 found — manually check with telnet or Evolution:{RESET}",
+            f"      telnet {target} 110",
+            f"      USER username",
+            f"      PASS password",
+            f"      LIST         (list messages)",
+            f"      RETR 1       (retrieve message 1)",
+            f"      Or use Evolution: New Account → POP  Port: 110",
+        ],
+        "POP3S": [
+            f"{YELLOW}[TIP] POP3S found — try Evolution:{RESET}",
+            f"      Evolution → New Account → POP  Port: 995  SSL: SSL/TLS",
+        ],
+        # FTP
+        "FTP": [
+            f"{YELLOW}[TIP] FTP found — check anonymous login and download all files:{RESET}",
+            f"      ftp {target}",
+            f"      Username: anonymous  Password: (blank or any email)",
+            f"      If logged in: wget -m ftp://anonymous:@{target}/",
+            f"      Also check binary mode for non-text files: binary",
+        ],
+        # SMB
+        "SMB": [
+            f"{YELLOW}[TIP] SMB found — enumerate shares and check access:{RESET}",
+            f"      smbclient -L //{target} -N",
+            f"      smbclient //{target}/SHARENAME -N",
+            f"      crackmapexec smb {target} -u '' -p '' --shares",
+            f"      crackmapexec smb {target} -u 'guest' -p '' --shares",
+        ],
+        # SMTP
+        "SMTP": [
+            f"{YELLOW}[TIP] SMTP found — enumerate users manually:{RESET}",
+            f"      nc {target} 25",
+            f"      EHLO test",
+            f"      VRFY root",
+            f"      VRFY admin",
+            f"      smtp-user-enum -M VRFY -U /usr/share/seclists/Usernames/top-usernames-shortlist.txt -t {target}",
+        ],
+        # DNS
+        "DNS": [
+            f"{YELLOW}[TIP] DNS found — attempt zone transfer manually:{RESET}",
+            f"      dig axfr @{target} DOMAIN.local",
+            f"      dnsrecon -d DOMAIN.local -a -n {target}",
+            f"      Add discovered hostnames to /etc/hosts",
+        ],
+        # NFS/RPC
+        "RPC": [
+            f"{YELLOW}[TIP] RPC found — check for NFS shares:{RESET}",
+            f"      showmount -e {target}",
+            f"      mount -t nfs {target}:/SHARE /mnt/nfs -o nolock",
+            f"      ls -la /mnt/nfs",
+        ],
+        "NFS": [
+            f"{YELLOW}[TIP] NFS found — mount and explore shares:{RESET}",
+            f"      showmount -e {target}",
+            f"      mkdir /mnt/nfs",
+            f"      mount -t nfs {target}:/SHARE /mnt/nfs -o nolock",
+            f"      ls -la /mnt/nfs",
+            f"      Check for .ssh keys, config files, backups",
+        ],
+        # HTTP
+        "HTTP": [
+            f"{YELLOW}[TIP] HTTP found — enumerate further:{RESET}",
+            f"      ffuf -u http://{target}/FUZZ -w /usr/share/seclists/Discovery/Web-Content/common.txt -mc 200,301,302,403",
+            f"      Check page source for comments and hidden fields",
+            f"      Check /robots.txt and /sitemap.xml manually",
+            f"      Add {target} to /etc/hosts if hostname based vhosts suspected",
+        ],
+        "HTTPS": [
+            f"{YELLOW}[TIP] HTTPS found — check SSL cert for hostnames:{RESET}",
+            f"      openssl s_client -connect {target}:443 | openssl x509 -noout -text | grep DNS",
+            f"      Add any discovered hostnames to /etc/hosts",
+            f"      ffuf -u https://{target}/FUZZ -w /usr/share/seclists/Discovery/Web-Content/common.txt -mc 200,301,302,403",
+        ],
+        # SNMP
+        "SNMP": [
+            f"{YELLOW}[TIP] SNMP found — try common community strings:{RESET}",
+            f"      snmpwalk -v2c -c public {target}",
+            f"      snmpwalk -v2c -c private {target}",
+            f"      onesixtyone -c /usr/share/seclists/Discovery/SNMP/snmp.txt {target}",
+        ],
+        # MySQL
+        "MySQL": [
+            f"{YELLOW}[TIP] MySQL found — try connecting:{RESET}",
+            f"      mysql -h {target} -u root",
+            f"      mysql -h {target} -u root -p",
+            f"      show databases;",
+            f"      select user,password from mysql.user;",
+        ],
+        # MSSQL
+        "MSSQL": [
+            f"{YELLOW}[TIP] MSSQL found — try connecting:{RESET}",
+            f"      impacket-mssqlclient sa@{target}",
+            f"      impacket-mssqlclient DOMAIN/user:pass@{target} -windows-auth",
+            f"      enable_xp_cmdshell",
+            f"      xp_cmdshell whoami",
+        ],
+        # RDP
+        "RDP": [
+            f"{YELLOW}[TIP] RDP found — try connecting with found credentials:{RESET}",
+            f"      xfreerdp /u:USERNAME /p:PASSWORD /v:{target}",
+            f"      rdesktop {target}",
+        ],
+        # Redis
+        "Redis": [
+            f"{YELLOW}[TIP] Redis found — check for unauthenticated access:{RESET}",
+            f"      redis-cli -h {target}",
+            f"      INFO",
+            f"      KEYS *",
+            f"      Check for webshell upload via redis config set",
+        ],
+        # VNC
+        "VNC": [
+            f"{YELLOW}[TIP] VNC found — try connecting:{RESET}",
+            f"      vncviewer {target}",
+            f"      Try empty password or common passwords",
+        ],
+        # LDAP
+        "LDAP": [
+            f"{YELLOW}[TIP] LDAP found — enumerate anonymously:{RESET}",
+            f"      ldapsearch -x -H ldap://{target} -b 'dc=DOMAIN,dc=local'",
+            f"      ldapsearch -x -H ldap://{target} -b '' -s base namingContexts",
+            f"      bloodhound-python -u user -p pass -d DOMAIN.local -ns {target} -c all",
+        ],
+        # distcc
+        "distcc": [
+            f"{YELLOW}[TIP] distcc found — likely vulnerable to RCE (CVE-2004-2687):{RESET}",
+            f"      nmap -Pn --script distcc-cve2004-2687 -p 3632 {target}",
+            f"      Use metasploit: use exploit/unix/misc/distcc_exec",
+        ],
+        # JDWP
+        "JDWP": [
+            f"{YELLOW}[TIP] JDWP (Java Debug) found — likely RCE:{RESET}",
+            f"      nmap -Pn --script jdwp-exec --script-args cmd='id' -p 5005 {target}",
+            f"      Use exploit: https://github.com/IOActive/jdwp-shellifier",
+        ],
+        # WinRM
+        "WinRM-HTTP": [
+            f"{YELLOW}[TIP] WinRM found — try connecting with found credentials:{RESET}",
+            f"      evil-winrm -i {target} -u USERNAME -p PASSWORD",
+            f"      evil-winrm -i {target} -u USERNAME -H NTLMHASH",
+        ],
+        # IPMI
+        "IPMI": [
+            f"{YELLOW}[TIP] IPMI found — check for cipher zero auth bypass:{RESET}",
+            f"      ipmitool -I lanplus -H {target} -U admin -P '' user list",
+            f"      Use metasploit: use auxiliary/scanner/ipmi/ipmi_dumphashes",
+            f"      Cipher zero vulnerability gives plaintext credentials",
+        ],
+    }
+
+    svc_tips = tips.get(svc_name)
+    if svc_tips:
+        print()
+        for tip in svc_tips:
+            print(f"  {tip}")
+        print()
+
+
 def phase4_script_enumeration(target, open_ports, output_dir, services=None):
     """
     For each open port run the appropriate NSE scripts.
@@ -1084,6 +1266,9 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
                 ]
                 if any(kw in line for kw in keywords):
                     log(f"  [INTERESTING] {line.strip()}", "warn")
+
+            # Post-scan tips based on service
+            post_scan_tips(port, svc_name, target)
 
         else:
             log(f"[Port {port}] No scripts matched — running default scripts")
