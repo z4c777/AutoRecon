@@ -8,12 +8,13 @@ Disclaimer: This tool was generated with AI.
 
 ---
 
-## Quick Start
+## Installation
 
 ```bash
-# Install
-pip install python-nmap
 sudo apt install nmap
+git clone https://github.com/z4c777/AutoRecon && cd AutoRecon
+pip install python-nmap
+```
 
 # Run
 python3 autorecon.py -t 10.129.98.84
@@ -32,6 +33,7 @@ autorecon_10.129.98.84_20260805_224943/
 ## Installation
 
 ```bash
+sudo apt install nmap
 git clone https://github.com/z4c777/AutoRecon && cd AutoRecon
 pip install python-nmap
 ```
