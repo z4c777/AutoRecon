@@ -27,7 +27,7 @@ autorecon_10.129.98.84_20260805_224943/
 ## Installation
 
 ```bash
-git clone https://github.com/yourrepo/autorecon
+git clone https://github.com/z4c777/AutoRecon
 cd autorecon
 pip install python-nmap
 chmod +x autorecon.py
@@ -292,18 +292,42 @@ Add an entry to `SERVICE_SCRIPTS` in the script:
 ## Changelog
 
 ### v2.0
-- Output folder now includes target IP in name
-- `--oA` flag to save nmap output in all formats
-- Non-standard port detection — matches by service name not just port number
-- Post-scan tips printed after each service
-- Weak SSH algorithm detection
-- Report summary cleaned up — no script lists, actionable findings only
-- Removed low-value scripts: `http-useragent-tester`, `http-bigip-cookie`, `http-cross-domain-policy`
-- `NOT VULNERABLE` false positive fix
-- 55 total service mappings
+
+**Output**
+- Folder name now includes target IP and timestamp — `autorecon_10.129.98.84_20260805_224943`
+- `--oA` flag saves nmap output in all three formats alongside `.txt`
+- Summary report shows nmap-style script output per port — no more flat port list
+- Report no longer lists every script that ran — shows actionable findings only
+
+**Script Selection**
+- Non-standard port detection — scripts matched by service name if port not in standard mapping
+  - e.g. FTP on port 2121 still gets `ftp-anon`, `ftp-vsftpd-backdoor` etc
+- `get_scripts_for_port()` helper handles port → service name → script lookup
+- 55 total service mappings (up from 40)
+
+**False Positive Fixes**
+- `@openssh.com` algorithm lines no longer flagged as interesting
+- `NOT VULNERABLE` lines excluded from interesting findings
+- `password` keyword tightened to `password:` — no longer matches SSH auth method listings
+- Weak SSH algorithms flagged separately as `[WEAK ALGO]` — modern algorithms silently skipped
+
+**SSH**
+- `ssh2-enum-algos` retained but only flags deprecated algorithms:
+  `arcfour`, `3des-cbc`, `blowfish-cbc`, `diffie-hellman-group1-sha1`, `hmac-md5`, `ssh-dss`
+
+**Post-Scan Tips**
+- Actionable next steps printed after each service is scanned
+- IMAP tip includes Evolution mail client setup
+- Tips cover: FTP, SMB, SMTP, DNS, RPC/NFS, HTTP/HTTPS, SNMP, MySQL, MSSQL, RDP, Redis, VNC, LDAP, distcc, JDWP, WinRM, IPMI
+
+**Removed Low-Value Scripts**
+- `http-useragent-tester` — noise, no pentest value
+- `http-bigip-cookie` — F5 only, irrelevant on HTB/CPTS
+- `http-cross-domain-policy` — Flash is dead
+- `ssh2-enum-algos` full output — replaced with weak algo detection only
 
 ### v1.0
-- Initial release
+- Initial release with 40 service mappings
 
 ---
 
