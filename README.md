@@ -145,9 +145,10 @@ VULNERABILITIES FOUND
 
 ## Service Coverage
 
-Scripts are automatically selected based on the detected service — even on non-standard ports. For example FTP running on port 2121 still gets FTP scripts.
+Scripts are automatically selected based on the detected service — even on non-standard ports.
+For example FTP running on port 2121 still gets FTP scripts.
 
-Example NSE scripts used:
+Sample of NSE scripts used:
 ### Network
 
 | Port | Service | Key Scripts |
