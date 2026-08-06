@@ -25,6 +25,7 @@ from datetime import datetime
 # ══════════════════════════════════════════════════════════
 VERSION     = "1.0"
 OUTPUT_DIR  = f"autorecon_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+USE_OA      = False   # Set to True via --oA flag
 
 # Colors
 RED     = "\033[91m"
@@ -127,8 +128,7 @@ SERVICE_SCRIPTS = {
             "http-open-redirect",
             "http-cors",
             "http-cookie-flags",
-            "http-cross-domain-policy",
-            "http-internal-ip-disclosure",
+                        "http-internal-ip-disclosure",
             "http-server-header",
             "http-favicon",
             "http-generator",
@@ -140,12 +140,10 @@ SERVICE_SCRIPTS = {
             "http-wordpress-users",
             "http-drupal-enum",
             "http-drupal-enum-users",
-            "http-bigip-cookie",
-            "http-backup-finder",
+                        "http-backup-finder",
             "http-config-backup",
             "http-trace",
-            "http-useragent-tester",
-            "http-vhosts",
+                        "http-vhosts",
         ]),
         "extra_args": ""
     },
@@ -250,8 +248,7 @@ SERVICE_SCRIPTS = {
             "http-open-redirect",
             "http-cors",
             "http-cookie-flags",
-            "http-cross-domain-policy",
-            "http-internal-ip-disclosure",
+                        "http-internal-ip-disclosure",
             "http-server-header",
             "http-favicon",
             "http-generator",
@@ -262,8 +259,7 @@ SERVICE_SCRIPTS = {
             "http-wordpress-enum",
             "http-wordpress-users",
             "http-drupal-enum",
-            "http-bigip-cookie",
-            "http-backup-finder",
+                        "http-backup-finder",
             "http-config-backup",
             "http-trace",
             "http-vhosts",
@@ -895,12 +891,22 @@ def save_output(output_dir, filename, content):
     return filepath
 
 
-def run_nmap_subprocess(target, args, output_dir, filename):
+def run_nmap_subprocess(target, args, output_dir, filename, use_oA=False):
     """
-    Run nmap directly via subprocess for cases where
-    python-nmap output isn't sufficient.
+    Run nmap directly via subprocess.
+    If use_oA is True also saves .nmap .gnmap .xml formats via -oA.
+    Default output is .txt only.
     """
-    cmd = f"nmap {args} {target}"
+    # Build base command
+    cmd = f"nmap {args}"
+
+    # Add -oA if requested
+    if use_oA:
+        base_name = filename.replace('.txt', '')
+        oA_path   = os.path.join(output_dir, base_name)
+        cmd += f" -oA {oA_path}"
+
+    cmd += f" {target}"
     log(f"Running: {cmd}")
 
     result = subprocess.run(
@@ -913,8 +919,12 @@ def run_nmap_subprocess(target, args, output_dir, filename):
     if result.stderr:
         output += f"\n[STDERR]\n{result.stderr}"
 
+    # Always save .txt
     filepath = save_output(output_dir, filename, output)
-    log(f"Saved to: {filepath}", "success")
+    if use_oA:
+        log(f"Saved to: {filepath} + .nmap/.gnmap/.xml", "success")
+    else:
+        log(f"Saved to: {filepath}", "success")
     return output
 
 
@@ -977,7 +987,8 @@ def phase2_service_detection(target, open_ports, output_dir):
         target=target,
         args=f"-Pn -sCV -p{ports_str}",
         output_dir=output_dir,
-        filename="02_service_detection.txt"
+        filename="02_service_detection.txt",
+                use_oA=USE_OA
     )
 
     # Parse services from output for display
@@ -1016,7 +1027,8 @@ def phase3_udp_scan(target, output_dir):
         target=target,
         args="-Pn -sU --top-ports 100",
         output_dir=output_dir,
-        filename="03_udp_scan.txt"
+        filename="03_udp_scan.txt",
+                use_oA=USE_OA
     )
 
     # Check for interesting UDP ports
@@ -1247,7 +1259,8 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
                 target=target,
                 args=args,
                 output_dir=output_dir,
-                filename=f"04_{port}_{svc_name.lower()}_scripts.txt"
+                filename=f"04_{port}_{svc_name.lower()}_scripts.txt",
+                use_oA=USE_OA
             )
 
             results[port] = {
@@ -1260,10 +1273,24 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
             for line in output.split('\n'):
                 # Skip SSH algorithm identifiers — not actionable
                 if "@openssh.com" in line:
+                    # Check for weak algorithms even in openssh.com lines
+                    weak_algos = [
+                        "arcfour", "blowfish-cbc", "3des-cbc",
+                        "diffie-hellman-group1-sha1",
+                        "diffie-hellman-group14-sha1",
+                        "hmac-md5", "ssh-dss",
+                    ]
+                    if any(w in line for w in weak_algos):
+                        log(f"  [WEAK ALGO] {line.strip()}", "warn")
                     continue
+                if "NOT VULNERABLE" in line or "not vulnerable" in line:
+                    continue
+                weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
+                if any(w in line for w in weak_standalone):
+                    log(f"  [WEAK ALGO] {line.strip()}", "warn")
                 keywords = [
                     "VULNERABLE", "vulnerable", "CVE-",
-                    "Anonymous", "anonymous", "password",
+                    "Anonymous", "anonymous", "password:",
                     "credential", "admin", "root",
                     "ERROR", "open", "uid=", "id="
                 ]
@@ -1279,7 +1306,8 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
                 target=target,
                 args=f"-Pn -sCV --script default -p {port}",
                 output_dir=output_dir,
-                filename=f"04_{port}_unknown_default.txt"
+                filename=f"04_{port}_unknown_default.txt",
+                use_oA=USE_OA
             )
 
     return results
@@ -1301,7 +1329,8 @@ def phase5_vuln_scan(target, open_ports, output_dir):
         target=target,
         args=f"-Pn --script 'vuln and safe' -p{ports_str}",
         output_dir=output_dir,
-        filename="05_vuln_scan.txt"
+        filename="05_vuln_scan.txt",
+                use_oA=USE_OA
     )
 
     # Extract vulnerability findings
@@ -1329,7 +1358,8 @@ def host_sweep(target, output_dir):
         target=target,
         args="-sn --min-rate 5000",
         output_dir=output_dir,
-        filename="00_host_sweep.txt"
+        filename="00_host_sweep.txt",
+                use_oA=USE_OA
     )
 
     live_hosts = []
@@ -1409,11 +1439,25 @@ def generate_report(target, open_ports, services, script_results, vuln_results, 
         found  = []
         for line in output.split("\n"):
             if "@openssh.com" in line:
+                # Flag weak algorithms even in openssh.com lines
+                weak_algos = [
+                    "arcfour", "blowfish-cbc", "3des-cbc",
+                    "diffie-hellman-group1-sha1",
+                    "diffie-hellman-group14-sha1",
+                    "hmac-md5", "ssh-dss",
+                ]
+                if any(w in line for w in weak_algos):
+                    found.append(f"[WEAK ALGO] {line.strip()}")
                 continue
+            if "NOT VULNERABLE" in line or "not vulnerable" in line:
+                continue
+            weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
+            if any(w in line for w in weak_standalone):
+                found.append(f"[WEAK ALGO] {line.strip()}")
             keywords = [
                 "VULNERABLE", "vulnerable", "CVE-",
                 "Anonymous login", "anonymous login",
-                "password", "credential",
+                "password:", "credential",
                 "root:", "uid=", "id=",
                 "WRITABLE", "No authentication",
                 "READ/WRITE",
@@ -1481,8 +1525,15 @@ def main():
     parser.add_argument("--ports-only",
         action="store_true",
         help="Only perform port discovery — no scripts")
+    parser.add_argument("--oA",
+        action="store_true",
+        help="Save nmap output in all formats (.nmap .gnmap .xml) in addition to .txt")
 
     args = parser.parse_args()
+
+    # Set global oA flag
+    global USE_OA
+    USE_OA = args.oA
 
     # Check nmap is installed
     try:
