@@ -44,6 +44,7 @@ python3 autorecon.py -t TARGET [options]
 | Flag | Description |
 |------|-------------|
 | `-t` | Target IP, hostname, or CIDR (required) |
+| `-d`, `--domain` | Domain name for DNS enumeration e.g. `inlanefreight.local` |
 | `-o` | Custom output directory |
 | `--sweep` | Ping sweep subnet first, scan each live host |
 | `--skip-udp` | Skip UDP scan |
@@ -56,6 +57,12 @@ python3 autorecon.py -t TARGET [options]
 ```bash
 # Single target
 python3 autorecon.py -t 10.129.98.84
+
+# With domain — enables DNS enumeration and zone transfer
+python3 autorecon.py -t 10.129.98.84 --domain inlanefreight.local
+
+# Hostname target — domain auto-derived
+python3 autorecon.py -t inlanefreight.local
 
 # Subnet — discover and scan all live hosts
 python3 autorecon.py -t 10.129.1.0/24 --sweep
@@ -77,9 +84,10 @@ python3 autorecon.py -t 10.129.98.84 -o /home/user/htb/machinename
 
 ## How It Works
 
-The scan runs in 5 phases:
+The scan runs in up to 6 phases:
 
 ```
+Phase 0  DNS enumeration            Record lookup + zone transfer (opt-in via --domain)
 Phase 1  Fast TCP port discovery    nmap -p- --min-rate 5000
 Phase 2  Service detection          nmap -sCV on open ports only
 Phase 3  UDP scan                   nmap -sU --top-ports 100
@@ -97,15 +105,15 @@ Every scan creates a timestamped folder named after the target:
 
 ```
 autorecon_10.129.98.84_20260805_224943/
-├── 00_summary_report.txt     All findings in one place
-├── 01_open_ports.txt         Open TCP ports
-├── 02_service_detection.txt  Version and banner info
-├── 03_udp_scan.txt           UDP results
-├── 04_21_ftp_scripts.txt     Per-port script output
-├── 04_22_ssh_scripts.txt
-├── 04_80_http_scripts.txt
-├── 04_445_smb_scripts.txt
-└── 05_vuln_scan.txt          Vulnerability findings
+├── 00_dns_enum.txt              DNS record enumeration (Phase 0)
+├── 00_dns_axfr_10_129_98_84.txt Zone transfer output if successful
+├── 00_summary_report.txt        All findings in one place
+├── 01_open_ports.txt            Open TCP ports
+├── 02_service_detection.txt     Version and banner info
+├── 03_udp_scan.txt              UDP results
+├── 04_tcp_scripts.txt           All TCP NSE script output
+├── 04_udp_scripts.txt           All UDP NSE script output
+└── 05_vuln_scan.txt             Vulnerability findings (--vuln only)
 ```
 
 The summary report shows:
@@ -295,6 +303,13 @@ Add an entry to `SERVICE_SCRIPTS` in the script:
 ---
 
 ## Changelog
+
+### v2.1
+- Phase 0 DNS enumeration — A, AAAA, MX, NS, TXT, SOA, SRV record lookup
+- Zone transfer via `dig axfr` against target and all discovered nameservers
+- `--domain` / `-d` flag for explicit domain targeting
+- Domain auto-derived from hostname target or reverse DNS if no flag provided
+- Post-scan tip for subdomain brute force with dnsrecon/dnsx
 
 ### v2.0
 
