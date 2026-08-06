@@ -1258,6 +1258,9 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
 
             # Highlight interesting findings
             for line in output.split('\n'):
+                # Skip SSH algorithm identifiers — not actionable
+                if "@openssh.com" in line:
+                    continue
                 keywords = [
                     "VULNERABLE", "vulnerable", "CVE-",
                     "Anonymous", "anonymous", "password",
@@ -1360,25 +1363,74 @@ def generate_report(target, open_ports, services, script_results, vuln_results, 
     report.append(f"Date:   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report.append(f"{'='*60}\n")
 
-    # Open ports
+    # Open ports with script output
     report.append("OPEN PORTS")
     report.append("-"*40)
+    report.append(f"  {'PORT':<12} {'STATE':<8} {'SERVICE':<12} VERSION")
+    report.append(f"  {'-'*60}")
+
     for port in open_ports:
         svc_name = services.get(port, {}).get('name', 'unknown')
         product  = services.get(port, {}).get('product', '')
         version  = services.get(port, {}).get('version', '')
-        info     = f"{svc_name} {product} {version}".strip()
-        report.append(f"  {port}/tcp — {info}")
+        version_str = f"{product} {version}".strip()
+        report.append(f"  {str(port)+'/tcp':<12} {'open':<8} {svc_name:<12} {version_str}")
+
+        # Include script output for this port if available
+        if port in script_results:
+            script_output = script_results[port].get('output', '')
+            if script_output:
+                # Find the relevant script output section
+                in_port_section = False
+                for line in script_output.split('\n'):
+                    # Start capturing after the port line
+                    if f"{port}/tcp" in line:
+                        in_port_section = True
+                        continue
+                    # Stop at next port or end of host section
+                    if in_port_section:
+                        if line and not line.startswith('|') and not line.startswith('|_') and not line.startswith('SF') and '/tcp' in line and str(port) not in line:
+                            break
+                        if line.startswith('|') or line.startswith('|_'):
+                            report.append(f"  {line}")
+
+        report.append("")
 
     report.append("")
 
-    # Script enumeration results
+    # Script enumeration — clean summary only
     report.append("SCRIPT ENUMERATION")
     report.append("-"*40)
+
+    interesting_findings = {}
     for port, data in script_results.items():
-        report.append(f"\n  Port {port} — {data['service']}")
-        report.append(f"  Scripts: {data['scripts']}")
-        report.append(f"  Output file: 04_{port}_{data['service'].lower()}_scripts.txt")
+        svc    = data["service"]
+        output = data.get("output", "")
+        found  = []
+        for line in output.split("\n"):
+            if "@openssh.com" in line:
+                continue
+            keywords = [
+                "VULNERABLE", "vulnerable", "CVE-",
+                "Anonymous login", "anonymous login",
+                "password", "credential",
+                "root:", "uid=", "id=",
+                "WRITABLE", "No authentication",
+                "READ/WRITE",
+            ]
+            if any(kw in line for kw in keywords):
+                found.append(line.strip())
+        if found:
+            interesting_findings[port] = {"service": svc, "findings": found}
+
+    if interesting_findings:
+        for port, data in interesting_findings.items():
+            report.append(f"\n  [!] Port {port} — {data['service']}")
+            for finding in data["findings"]:
+                report.append(f"      {finding}")
+    else:
+        report.append("  Script enumeration complete — no vulnerabilities found")
+        report.append(f"  All output files saved to: {output_dir}")
 
     report.append("")
 
@@ -1448,7 +1500,12 @@ def main():
         sys.exit(1)
 
     # Create output directory
-    output_dir = args.output
+    # Use target IP in folder name if user didn't specify custom output dir
+    if args.output == OUTPUT_DIR:
+        safe_target = args.target.replace('/', '_').replace('\\', '_')
+        output_dir = f"autorecon_{safe_target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    else:
+        output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
     log(f"Output directory: {output_dir}")
 
