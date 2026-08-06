@@ -899,9 +899,16 @@ def check_target_reachable(target):
     import socket
     import subprocess as sp
 
+    def _is_ip(addr):
+        try:
+            socket.inet_aton(addr.split('/')[0])
+            return True
+        except socket.error:
+            return False
+
     # Resolve hostname to IP first
     resolved_ip = target
-    if not is_ip(target):
+    if not _is_ip(target):
         try:
             resolved_ip = socket.gethostbyname(target)
             log(f"Resolved {target} to {resolved_ip}")
@@ -909,9 +916,7 @@ def check_target_reachable(target):
             return False, f"Cannot resolve hostname '{target}' — check the target is correct and DNS is working"
 
     # Validate IP format
-    try:
-        socket.inet_aton(resolved_ip.split('/')[0])
-    except socket.error:
+    if not _is_ip(resolved_ip):
         return False, f"Invalid IP address format: {target}"
 
     # Check if target is on local network or routable
