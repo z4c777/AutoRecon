@@ -18,6 +18,9 @@ sudo apt install nmap
 # Run
 python3 autorecon.py -t 10.129.98.84
 ```
+Within 30 seconds you will see all open ports on the machine in your terminal output.
+Within 1 minute you will see versions for each open port.
+Complete scan with DNS/UDP/NSE scripts takes 8-10 minutes so be patient.
 
 Output folder is created automatically:
 ```
