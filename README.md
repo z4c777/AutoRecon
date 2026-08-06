@@ -29,10 +29,8 @@ autorecon_10.129.98.84_20260805_224943/
 ## Installation
 
 ```bash
-git clone https://github.com/z4c777/AutoRecon
-cd autorecon
+git clone https://github.com/z4c777/AutoRecon && cd AutoRecon
 pip install python-nmap
-chmod +x autorecon.py
 ```
 
 ---
