@@ -1,31 +1,25 @@
 # AutoRecon 🔍
 
-Automated Nmap enumeration script for penetration testing. Performs multi-phase scanning — discovers open ports, detects services, runs targeted NSE scripts, and produces a clean summary report.
+Automated Nmap enumeration for penetration testing. Point it at a target and it handles the rest — port discovery, service detection, targeted NSE scripts, and a clean summary report.
 
-Built for HackTheBox CPTS and general CTF/pentest engagements.
-
----
-
-## Features
-
-- **5-phase scanning pipeline** — port discovery → service detection → UDP → script enumeration → vuln scan
-- **Automatic script selection** — maps 55 services to their most relevant NSE scripts
-- **Subnet support** — ping sweep then scan each live host
-- **Color coded terminal output** — highlights interesting findings in real time
-- **Organized output** — one file per scan phase, per port
-- **Summary report** — aggregated findings at the end of every scan
+Built for HackTheBox CPTS and CTF engagements.
 
 ---
 
-## Requirements
+## Quick Start
 
 ```bash
-# nmap must be installed
-sudo apt install nmap        # Kali/Debian
-brew install nmap            # Mac
-
-# Python dependency
+# Install
 pip install python-nmap
+sudo apt install nmap
+
+# Run
+python3 autorecon.py -t 10.129.98.84
+```
+
+Output folder is created automatically:
+```
+autorecon_10.129.98.84_20260805_224943/
 ```
 
 ---
@@ -36,6 +30,7 @@ pip install python-nmap
 git clone https://github.com/yourrepo/autorecon
 cd autorecon
 pip install python-nmap
+chmod +x autorecon.py
 ```
 
 ---
@@ -46,253 +41,275 @@ pip install python-nmap
 python3 autorecon.py -t TARGET [options]
 ```
 
-### Basic Examples
-
-```bash
-# Full scan against single target
-python3 autorecon.py -t 10.129.1.5
-
-# Custom output directory
-python3 autorecon.py -t 10.129.1.5 -o /home/user/htb/machine_name
-
-# Subnet sweep — discover live hosts then scan each one
-python3 autorecon.py -t 10.129.1.0/24 --sweep
-
-# Skip UDP and vuln scan for speed
-python3 autorecon.py -t 10.129.1.5 --skip-udp --skip-vuln
-
-# Port discovery only — no script enumeration
-python3 autorecon.py -t 10.129.1.5 --ports-only
-```
-
-### All Options
-
 | Flag | Description |
 |------|-------------|
-| `-t`, `--target` | Target IP, hostname, or CIDR range (required) |
-| `-o`, `--output` | Output directory (default: autorecon_TIMESTAMP) |
-| `--sweep` | Ping sweep subnet first, then scan each live host |
+| `-t` | Target IP, hostname, or CIDR (required) |
+| `-o` | Custom output directory |
+| `--sweep` | Ping sweep subnet first, scan each live host |
 | `--skip-udp` | Skip UDP scan |
 | `--skip-vuln` | Skip vulnerability scan |
-| `--ports-only` | Port discovery only — no service detection or scripts |
+| `--ports-only` | Port discovery only — no scripts |
+| `--oA` | Save nmap output in all formats (.nmap .gnmap .xml) |
 
----
+### Examples
 
-## Scan Phases
+```bash
+# Single target
+python3 autorecon.py -t 10.129.98.84
 
-### Phase 1 — Fast TCP Port Discovery
-Scans all 65535 TCP ports using `--min-rate 5000` to find open ports quickly before running heavier scans.
+# Subnet — discover and scan all live hosts
+python3 autorecon.py -t 10.129.1.0/24 --sweep
 
-```
-nmap -Pn -p- --min-rate 5000 --open -T4 TARGET
-```
+# Fast scan — skip UDP and vuln scan
+python3 autorecon.py -t 10.129.98.84 --skip-udp --skip-vuln
 
-### Phase 2 — Service and Version Detection
-Runs `-sCV` only against confirmed open ports — significantly faster than full `-sCV -p-`.
+# Save nmap output in all formats
+python3 autorecon.py -t 10.129.98.84 --oA
 
-```
-nmap -Pn -sCV -p<OPEN_PORTS> TARGET
-```
-
-### Phase 3 — UDP Scan
-Scans top 100 UDP ports to catch commonly missed services like SNMP, DNS, TFTP, NTP, and IPMI.
-
-```
-nmap -Pn -sU --top-ports 100 TARGET
-```
-
-### Phase 4 — Targeted NSE Script Enumeration
-For each open port looks up the service in the script mapping and runs the appropriate NSE scripts automatically.
-
-### Phase 5 — Vulnerability Scan
-Runs the `vuln and safe` NSE categories against all open ports to detect known vulnerabilities.
-
-```
-nmap -Pn --script 'vuln and safe' -p<OPEN_PORTS> TARGET
+# Custom output directory
+python3 autorecon.py -t 10.129.98.84 -o /home/user/htb/machinename
 ```
 
 ---
 
-## Service → Script Mapping (55 Services)
+## How It Works
 
-### Network Services
+The scan runs in 5 phases:
 
-| Port | Service | Scripts Run |
+```
+Phase 1  Fast TCP port discovery    nmap -p- --min-rate 5000
+Phase 2  Service detection          nmap -sCV on open ports only
+Phase 3  UDP scan                   nmap -sU --top-ports 100
+Phase 4  NSE script enumeration     Targeted scripts per service
+Phase 5  Vulnerability scan         nmap --script 'vuln and safe'
+```
+
+---
+
+## Output
+
+Every scan creates a timestamped folder named after the target:
+
+```
+autorecon_10.129.98.84_20260805_224943/
+├── 00_summary_report.txt     All findings in one place
+├── 01_open_ports.txt         Open TCP ports
+├── 02_service_detection.txt  Version and banner info
+├── 03_udp_scan.txt           UDP results
+├── 04_21_ftp_scripts.txt     Per-port script output
+├── 04_22_ssh_scripts.txt
+├── 04_80_http_scripts.txt
+├── 04_445_smb_scripts.txt
+└── 05_vuln_scan.txt          Vulnerability findings
+```
+
+The summary report shows:
+
+```
+OPEN PORTS
+------------------------------------------------------------
+  PORT         STATE    SERVICE      VERSION
+  21/tcp       open     ftp          vsftpd 3.0.3
+  | ftp-anon: Anonymous FTP login allowed (FTP code 230)
+  |_-rw-r--r-- 1 0 0 38 May 30 2022 flag.txt
+
+  22/tcp       open     ssh          OpenSSH 8.2p1 Ubuntu
+  445/tcp      open     smb          Samba 4.x
+
+SCRIPT ENUMERATION
+------------------------------------------------------------
+  [!] Port 21 — FTP
+      Anonymous FTP login allowed
+
+VULNERABILITIES FOUND
+------------------------------------------------------------
+  [!] smb-vuln-ms17-010: VULNERABLE
+```
+
+---
+
+## Service Coverage
+
+Scripts are automatically selected based on the detected service — even on non-standard ports. For example FTP running on port 2121 still gets FTP scripts.
+
+### Network
+
+| Port | Service | Key Scripts |
 |------|---------|-------------|
-| 21 | FTP | ftp-anon, ftp-syst, ftp-vsftpd-backdoor, ftp-proftpd-backdoor, ftp-bounce, ftp-libopie, ftp-vuln-cve2010-4221 |
-| 22 | SSH | ssh-auth-methods, ssh2-enum-algos, ssh-hostkey, ssh-publickey-acceptance |
+| 21 | FTP | ftp-anon, ftp-vsftpd-backdoor, ftp-proftpd-backdoor |
+| 22 | SSH | ssh-auth-methods, ssh2-enum-algos, ssh-hostkey |
 | 23 | Telnet | telnet-ntlm-info, banner |
-| 53 | DNS | dns-zone-transfer, dns-srv-enum, dns-recursion, dns-nsid, dns-cache-snoop, dns-check-zone, dns-random-srcport, dns-random-txid, dns-nsec-enum, dns-brute, fcrdns |
+| 53 | DNS | dns-zone-transfer, dns-brute, dns-srv-enum |
 | 69 | TFTP (UDP) | tftp-enum |
 | 79 | Finger | finger |
 | 111 | RPC | rpcinfo, nfs-showmount |
-| 113 | IDENT | auth-owners, auth-spoof |
 | 123 | NTP (UDP) | ntp-info, ntp-monlist |
 | 873 | rsync | rsync-list-modules |
 
-### Mail Services
+### Mail
 
-| Port | Service | Scripts Run |
+| Port | Service | Key Scripts |
 |------|---------|-------------|
-| 25 | SMTP | smtp-commands, smtp-enum-users, smtp-ntlm-info, smtp-open-relay, smtp-strangeport, smtp-vuln-cve2010-4344, smtp-vuln-cve2011-1720, smtp-vuln-cve2011-1764 |
+| 25 | SMTP | smtp-commands, smtp-enum-users, smtp-open-relay, smtp-vuln-* |
 | 110 | POP3 | pop3-capabilities, pop3-ntlm-info |
 | 143 | IMAP | imap-capabilities, imap-ntlm-info |
-| 465 | SMTPS | smtp-commands, smtp-enum-users, smtp-ntlm-info, smtp-open-relay |
-| 587 | SMTP Submission | smtp-commands, smtp-ntlm-info, smtp-open-relay, smtp-enum-users |
-| 993 | IMAPS | imap-capabilities, imap-ntlm-info, ssl-cert |
-| 995 | POP3S | pop3-capabilities, pop3-ntlm-info, ssl-cert |
+| 465 | SMTPS | smtp-commands, smtp-enum-users |
+| 587 | Submission | smtp-commands, smtp-open-relay |
+| 993 | IMAPS | imap-capabilities, ssl-cert |
+| 995 | POP3S | pop3-capabilities, ssl-cert |
 
-### Web Services
+### Web
 
-| Port | Service | Scripts Run |
+| Port | Service | Key Scripts |
 |------|---------|-------------|
-| 80 | HTTP | http-title, http-enum, http-methods, http-robots.txt, http-git, http-auth, http-auth-finder, http-headers, http-security-headers, http-ntlm-info, http-default-accounts, http-waf-detect, http-waf-fingerprint, http-shellshock, http-vuln-cve2017-5638, http-vuln-cve2014-3704, http-vuln-cve2015-1635, http-vuln-cve2012-1823, http-vuln-cve2010-0738, http-vuln-cve2010-2861, http-iis-webdav-vuln, http-method-tamper, http-passwd, http-open-redirect, http-cors, http-cookie-flags, http-cross-domain-policy, http-internal-ip-disclosure, http-server-header, http-favicon, http-generator, http-php-version, http-apache-server-status, http-aspnet-debug, http-webdav-scan, http-wordpress-enum, http-wordpress-users, http-drupal-enum, http-drupal-enum-users, http-bigip-cookie, http-backup-finder, http-config-backup, http-trace, http-vhosts |
-| 443 | HTTPS | All HTTP scripts + ssl-cert, ssl-enum-ciphers, ssl-heartbleed, rsa-vuln-roca |
+| 80 | HTTP | http-enum, http-methods, http-git, http-shellshock, http-vuln-* |
+| 443 | HTTPS | All HTTP scripts + ssl-cert, ssl-enum-ciphers, ssl-heartbleed |
 | 8080 | HTTP-Alt | All HTTP scripts |
-| 8443 | HTTPS-Alt | All HTTP scripts + ssl-cert, ssl-enum-ciphers, ssl-heartbleed |
-| 8009 | AJP/Tomcat | ajp-headers, ajp-methods, ajp-auth, ajp-request |
+| 8443 | HTTPS-Alt | All HTTP scripts + ssl-cert |
+| 8009 | AJP/Tomcat | ajp-headers, ajp-methods, ajp-auth |
 
 ### Windows / Active Directory
 
-| Port | Service | Scripts Run |
+| Port | Service | Key Scripts |
 |------|---------|-------------|
 | 88 | Kerberos | krb5-enum-users |
 | 135 | MSRPC | msrpc-enum |
-| 137 | NetBIOS-NS (UDP) | nbstat, nbns-interfaces |
-| 139 | SMB/NetBIOS | smb-os-discovery, smb-security-mode, smb-enum-shares, smb-enum-users, smb-enum-groups, smb-enum-domains, smb-enum-sessions, smb-enum-services, smb-protocols, smb-system-info, nbstat |
-| 389 | LDAP | ldap-rootdse, ldap-search, ldap-novell-getpass |
-| 445 | SMB | smb-os-discovery, smb-security-mode, smb-enum-shares, smb-enum-users, smb-enum-groups, smb-enum-domains, smb-enum-sessions, smb-enum-services, smb-enum-processes, smb-protocols, smb2-security-mode, smb2-capabilities, smb2-time, smb-system-info, smb-server-stats, smb-mbenum, smb-vuln-ms17-010, smb-vuln-ms08-067, smb-vuln-ms06-025, smb-vuln-ms07-029, smb-vuln-ms10-054, smb-vuln-ms10-061, smb-vuln-cve-2017-7494, smb-vuln-cve2009-3103, smb-double-pulsar-backdoor, smb-vuln-webexec, samba-vuln-cve-2012-1182 |
-| 636 | LDAPS | ldap-rootdse, ldap-search, ssl-cert, ssl-enum-ciphers |
+| 139 | NetBIOS | smb-os-discovery, smb-enum-shares, nbstat |
+| 389 | LDAP | ldap-rootdse, ldap-search |
+| 445 | SMB | smb-enum-shares, smb-enum-users, smb-vuln-ms17-010, smb-vuln-ms08-067 |
+| 636 | LDAPS | ldap-rootdse, ssl-cert |
 | 3268 | Global Catalog | ldap-rootdse, ldap-search |
-| 3269 | Global Catalog SSL | ldap-rootdse, ldap-search, ssl-cert |
 | 3389 | RDP | rdp-enum-encryption, rdp-ntlm-info, rdp-vuln-ms12-020 |
-| 5985 | WinRM HTTP | http-auth-finder, http-ntlm-info |
-| 5986 | WinRM HTTPS | http-auth-finder, http-ntlm-info, ssl-cert |
-| 9389 | AD Web Services | http-auth-finder, http-ntlm-info |
+| 5985 | WinRM | http-auth-finder, http-ntlm-info |
 
 ### Databases
 
-| Port | Service | Scripts Run |
+| Port | Service | Key Scripts |
 |------|---------|-------------|
-| 1433 | MSSQL | ms-sql-info, ms-sql-empty-password, ms-sql-config, ms-sql-dump-hashes, ms-sql-ntlm-info, ms-sql-xp-cmdshell, ms-sql-hasdbaccess, ms-sql-tables, ms-sql-dac, broadcast-ms-sql-discover |
-| 1521 | Oracle | oracle-tns-version, oracle-sid-brute, oracle-enum-users |
-| 3306 | MySQL | mysql-info, mysql-empty-password, mysql-enum, mysql-databases, mysql-users, mysql-variables, mysql-dump-hashes, mysql-audit, mysql-vuln-cve2012-2122 |
+| 1433 | MSSQL | ms-sql-info, ms-sql-empty-password, ms-sql-xp-cmdshell |
+| 1521 | Oracle | oracle-tns-version, oracle-sid-brute |
+| 3306 | MySQL | mysql-info, mysql-empty-password, mysql-dump-hashes |
 | 5432 | PostgreSQL | pgsql-brute |
 | 6379 | Redis | redis-info |
-| 11211 | Memcached | memcached-info |
 | 27017 | MongoDB | mongodb-info, mongodb-databases |
 | 5984 | CouchDB | couchdb-databases, couchdb-stats |
-| 9042 | Cassandra | cassandra-info |
 | 9200 | Elasticsearch | http-title, http-methods |
+| 11211 | Memcached | memcached-info |
 
-### Remote Access / Management
+### Infrastructure / Dev
 
-| Port | Service | Scripts Run |
+| Port | Service | Key Scripts |
 |------|---------|-------------|
-| 161 | SNMP (UDP) | snmp-info, snmp-sysdescr, snmp-interfaces, snmp-processes, snmp-netstat, snmp-win32-users, snmp-win32-shares, snmp-win32-services, snmp-win32-software, snmp-hh3c-logins, snmp-ios-config |
+| 161 | SNMP (UDP) | snmp-info, snmp-processes, snmp-win32-users, snmp-win32-shares |
 | 623 | IPMI (UDP) | ipmi-version, ipmi-cipher-zero |
-| 1723 | PPTP | pptp-version |
-| 5900 | VNC | vnc-info, realvnc-auth-bypass |
-
-### Development / Infrastructure
-
-| Port | Service | Scripts Run |
-|------|---------|-------------|
 | 1099 | RMI | rmi-dumpregistry, rmi-vuln-classloader |
 | 2049 | NFS | nfs-showmount, nfs-ls, nfs-statfs |
 | 2375 | Docker | docker-version |
 | 3632 | distcc | distcc-cve2004-2687 (RCE) |
-| 5005 | JDWP | jdwp-exec, jdwp-info, jdwp-inject, jdwp-version |
-| 6667 | IRC | irc-unrealircd-backdoor, irc-info, irc-botnet-channels |
-
-> Ports not in the mapping fall back to default NSE scripts (`-sCV --script default`).
+| 5005 | JDWP | jdwp-exec, jdwp-info, jdwp-inject (RCE) |
+| 5900 | VNC | vnc-info, realvnc-auth-bypass |
+| 6667 | IRC | irc-unrealircd-backdoor |
+| 9042 | Cassandra | cassandra-info |
 
 ---
 
-## Output Structure
+## Smart Features
 
-Every scan creates a timestamped output directory:
-
-```
-autorecon_20260805_120000/
-├── 00_summary_report.txt        Overview of all findings
-├── 00_live_hosts.txt            Live hosts found (sweep mode only)
-├── 01_open_ports.txt            All open TCP ports
-├── 02_service_detection.txt     -sCV output
-├── 03_udp_scan.txt              Top 100 UDP results
-├── 04_21_ftp_scripts.txt        Per-port NSE script output
-├── 04_22_ssh_scripts.txt
-├── 04_80_http_scripts.txt
-├── 04_445_smb_scripts.txt
-└── 05_vuln_scan.txt             Vulnerability scan findings
-```
-
-For subnet sweeps each host gets its own subdirectory:
+### Non-Standard Port Detection
+If a service runs on an unusual port the script detects it by service name and applies the right scripts automatically.
 
 ```
-autorecon_20260805_120000/
-├── 00_live_hosts.txt
-├── 10_129_1_5/
-│   ├── 00_summary_report.txt
-│   ├── 01_open_ports.txt
-│   └── ...
-└── 10_129_1_10/
-    ├── 00_summary_report.txt
-    ├── 01_open_ports.txt
-    └── ...
+FTP on port 2121  →  ftp-anon, ftp-vsftpd-backdoor etc
+HTTP on port 8888 →  Full HTTP script suite
+MySQL on port 3307 → mysql-info, mysql-dump-hashes etc
 ```
+
+### Post-Scan Tips
+After scanning each service actionable next steps are printed automatically. Example for IMAP:
+
+```
+[TIP] IMAP found — if on a Linux host try Evolution mail client:
+      sudo apt install evolution
+      Launch Evolution → New Account → IMAP
+      Server: 10.129.98.84  Port: 143
+```
+
+### Weak SSH Algorithm Detection
+`ssh2-enum-algos` runs against SSH but only flags deprecated algorithms:
+
+| Algorithm | Reason flagged |
+|-----------|---------------|
+| `arcfour` | RC4 — cryptographically broken |
+| `3des-cbc` | Sweet32 vulnerable |
+| `diffie-hellman-group1-sha1` | Logjam vulnerable |
+| `hmac-md5` | MD5 — broken |
+| `ssh-dss` | DSA — deprecated |
+
+Modern algorithms are silently skipped — no noise.
+
+### Interesting Findings Filter
+The summary only shows genuinely actionable output:
+- Vulnerable findings
+- Anonymous login allowed
+- Credentials or password hashes
+- RCE indicators
+
+False positives filtered out:
+- SSH algorithm lists
+- `NOT VULNERABLE` lines
+- OpenSSH identifier strings
 
 ---
 
 ## Adding Custom Services
 
-To add a new service open `autorecon.py` and add an entry to the `SERVICE_SCRIPTS` dictionary:
+Add an entry to `SERVICE_SCRIPTS` in the script:
 
 ```python
-SERVICE_SCRIPTS = {
-    # existing entries...
-
-    # Add your custom service
-    1234: {
-        "name": "MyService",
-        "scripts": ",".join([
-            "my-script-1",
-            "my-script-2",
-            "my-script-3",
-        ]),
-        "extra_args": ""        # Optional nmap flags e.g. "-sU" for UDP
-    },
-}
+1234: {
+    "name": "MyService",
+    "scripts": ",".join([
+        "my-script-1",
+        "my-script-2",
+    ]),
+    "extra_args": ""   # e.g. "-sU" for UDP services
+},
 ```
 
-The script will automatically run your custom scripts whenever port 1234 is found open.
+---
+
+## CPTS Tips
+
+- Run `--skip-udp --skip-vuln` for a fast first pass to map the attack surface
+- Run the full scan in the background while manually investigating
+- Check `00_summary_report.txt` first — interesting findings are flagged automatically
+- For AD targets confirm ports 88, 389, 445, 3268, 5985 are in scope
+- IPMI on UDP 623 — cipher zero vulnerability gives plaintext credentials
+- distcc on 3632 and JDWP on 5005 — both have active RCE scripts
 
 ---
 
 ## Changelog
 
 ### v2.0
-- **55 service mappings** (up from 40)
-- Added missing HTTP vuln scripts: shellshock, Struts, Drupageddon, MS15-034, IIS WebDAV, PHP-CGI
-- Added HTTP enumeration scripts: auth-finder, waf-fingerprint, bigip-cookie, backup-finder, config-backup, vhosts, cors, cookie-flags, passwd, method-tamper
-- Added SSL scripts: ssl-heartbleed, rsa-vuln-roca
-- Expanded SMB coverage: all enum scripts, all vuln scripts including webexec and samba CVE
-- Expanded MSSQL: hasdbaccess, tables, dac, broadcast discovery
-- Expanded MySQL: variables, audit, CVE-2012-2122
-- Added JDWP: inject, version scripts
-- Added IRC: botnet-channels
-- Added AJP: auth, request
-- Added SNMP: hh3c-logins, ios-config
-- New services: TFTP, NTP, NetBIOS-NS, IPMI, IMAPS, POP3S, RMI, PPTP, Docker, CouchDB, Cassandra, Elasticsearch, Memcached
+- Output folder now includes target IP in name
+- `--oA` flag to save nmap output in all formats
+- Non-standard port detection — matches by service name not just port number
+- Post-scan tips printed after each service
+- Weak SSH algorithm detection
+- Report summary cleaned up — no script lists, actionable findings only
+- Removed low-value scripts: `http-useragent-tester`, `http-bigip-cookie`, `http-cross-domain-policy`
+- `NOT VULNERABLE` false positive fix
+- 55 total service mappings
 
 ### v1.0
-- Initial release with 40 service mappings
+- Initial release
 
 ---
 
 ## Disclaimer
 
-This tool is for authorized penetration testing and CTF environments only. Do not use against systems you do not have explicit written permission to test.
+For authorized penetration testing and CTF environments only.
 
 ---
 
