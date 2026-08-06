@@ -36,7 +36,6 @@ pip install python-nmap
 git clone https://github.com/yourrepo/autorecon
 cd autorecon
 pip install python-nmap
-chmod +x autorecon.py
 ```
 
 ---
