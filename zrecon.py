@@ -961,19 +961,22 @@ def update_hosts_file(target_ip, hostnames):
         confirm = 'n'
 
     if confirm == 'y':
+        entry = f"{target_ip}  {' '.join(new_hostnames)}  # zrecon"
         try:
-            entry = f"\n{target_ip}  {' '.join(new_hostnames)}  # zrecon"
-            with open('/etc/hosts', 'a') as f:
-                f.write(entry)
-            log(f"Added to /etc/hosts: {target_ip}  {' '.join(new_hostnames)}", "success")
-        except PermissionError:
-            log("Permission denied — run with sudo to update /etc/hosts", "error")
-            log(f"Manual: echo '{target_ip}  {chr(32).join(new_hostnames)}' >> /etc/hosts", "warn")
+            import subprocess as sp
+            result = sp.run(
+                f"echo '{entry}' | sudo tee -a /etc/hosts",
+                shell=True, capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                log(f"Added to /etc/hosts: {entry}", "success")
+            else:
+                log(f"Failed to update /etc/hosts: {result.stderr.strip()}", "error")
         except Exception as e:
             log(f"Could not update /etc/hosts: {e}", "error")
     else:
         log(f"Skipped — manual command:")
-        log(f"  echo '{target_ip}  {chr(32).join(new_hostnames)}' >> /etc/hosts")
+        log(f"  echo '{target_ip}  {chr(32).join(new_hostnames)}' | sudo tee -a /etc/hosts")
 
 
 def save_output(output_dir, filename, content):
@@ -2687,40 +2690,90 @@ def generate_report(target, open_ports, services, script_results, vuln_results, 
     report.append("SCRIPT ENUMERATION")
     report.append("-"*40)
 
+    # All ports share same combined output — parse once, deduplicate
+    seen_findings = set()
     interesting_findings = {}
+
+    # Get combined output once (all ports share same file)
+    combined_output = ""
     for port, data in script_results.items():
-        svc    = data["service"]
-        output = data.get("output", "")
-        found  = []
-        for line in output.split("\n"):
+        if data.get("output"):
+            combined_output = data["output"]
+            break
+
+    # Parse findings once from combined output
+    all_found = []
+    for line in combined_output.split("\n"):
+        if "@openssh.com" in line:
+            weak_algos = ["arcfour", "blowfish-cbc", "3des-cbc",
+                          "diffie-hellman-group1-sha1",
+                          "diffie-hellman-group14-sha1",
+                          "hmac-md5", "ssh-dss"]
+            if any(w in line for w in weak_algos):
+                finding = f"[WEAK ALGO] {line.strip()}"
+                if finding not in seen_findings:
+                    seen_findings.add(finding)
+                    all_found.append((None, "WEAK ALGO", finding))
+            continue
+        if "NOT VULNERABLE" in line or "not vulnerable" in line:
+            continue
+        weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
+        if any(w in line for w in weak_standalone):
+            finding = f"[WEAK ALGO] {line.strip()}"
+            if finding not in seen_findings:
+                seen_findings.add(finding)
+                all_found.append((None, "WEAK ALGO", finding))
+        keywords = [
+            "VULNERABLE", "vulnerable", "CVE-",
+            "Anonymous FTP", "anonymous login",
+            "login allowed",
+            "password:", "credential",
+            "root:", "uid=", "id=",
+            "No auth", "WRITABLE", "READ/WRITE",
+        ]
+        if any(kw in line for kw in keywords):
+            if line.strip() not in seen_findings:
+                seen_findings.add(line.strip())
+                # Find which port this finding belongs to by checking port lines above
+                all_found.append((None, "FINDING", line.strip()))
+
+    # Associate findings with correct port based on nmap output structure
+    current_port = None
+    port_findings = {}
+    for line in combined_output.split("\n"):
+        import re
+        port_match = re.match(r'^([0-9]+)/tcp', line.strip())
+        if port_match:
+            current_port = int(port_match.group(1))
+            if current_port not in port_findings:
+                port_findings[current_port] = []
+        elif current_port and line.strip():
             if "@openssh.com" in line:
-                # Flag weak algorithms even in openssh.com lines
-                weak_algos = [
-                    "arcfour", "blowfish-cbc", "3des-cbc",
-                    "diffie-hellman-group1-sha1",
-                    "diffie-hellman-group14-sha1",
-                    "hmac-md5", "ssh-dss",
-                ]
-                if any(w in line for w in weak_algos):
-                    found.append(f"[WEAK ALGO] {line.strip()}")
                 continue
             if "NOT VULNERABLE" in line or "not vulnerable" in line:
                 continue
-            weak_standalone = ["hmac-md5", "ssh-dss", "arcfour", "blowfish-cbc", "3des-cbc"]
-            if any(w in line for w in weak_standalone):
-                found.append(f"[WEAK ALGO] {line.strip()}")
             keywords = [
                 "VULNERABLE", "vulnerable", "CVE-",
                 "Anonymous FTP", "anonymous login",
-                "login allowed",
-                "password:", "credential",
-                "root:", "uid=", "id=",
-                "No auth", "WRITABLE", "READ/WRITE",
+                "login allowed", "password:", "credential",
+                "root:", "uid=", "id=", "No auth", "WRITABLE", "READ/WRITE",
             ]
-            if any(kw in line for kw in keywords):
-                found.append(line.strip())
-        if found:
-            interesting_findings[port] = {"service": svc, "findings": found}
+            weak_algos = ["arcfour", "blowfish-cbc", "3des-cbc",
+                          "diffie-hellman-group1-sha1", "hmac-md5", "ssh-dss"]
+            finding = None
+            if any(w in line for w in weak_algos):
+                finding = f"[WEAK ALGO] {line.strip()}"
+            elif any(kw in line for kw in keywords):
+                finding = line.strip()
+            if finding and finding not in seen_findings:
+                seen_findings.add(finding)
+                port_findings[current_port].append(finding)
+
+    # Build interesting_findings from port-associated findings
+    for port, findings in port_findings.items():
+        if findings:
+            svc = script_results.get(port, {}).get("service", "unknown")
+            interesting_findings[port] = {"service": svc, "findings": findings}
 
     if interesting_findings:
         for port, data in interesting_findings.items():
