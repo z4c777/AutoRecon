@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-AutoRecon — Automated Nmap Enumeration Script
+ZRecon — Automated Nmap Enumeration Script
 For authorized penetration testing only (HackTheBox, CPTS, etc.)
 
 Usage:
-    python3 autorecon.py -t TARGET_IP
-    python3 autorecon.py -t TARGET_IP -o /output/dir
-    python3 autorecon.py -t 10.129.1.0/24 --sweep
+    python3 zrecon.py -t TARGET_IP
+    python3 zrecon.py -t TARGET_IP -o /output/dir
+    python3 zrecon.py -t 10.129.1.0/24 --sweep
 
 Install:
     pip install python-nmap
@@ -24,7 +24,7 @@ from datetime import datetime
 #  CONFIG
 # ══════════════════════════════════════════════════════════
 VERSION     = "1.0"
-OUTPUT_DIR  = f"autorecon_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+OUTPUT_DIR  = f"zrecon_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 USE_OA      = False   # Set to True via --oA flag
 
 # Colors
@@ -887,7 +887,7 @@ def log(msg, level="info"):
 # ══════════════════════════════════════════════════════════
 def save_state(output_dir, phase, data=None):
     """Save current scan state to JSON so interrupted scans can resume."""
-    state_file = os.path.join(output_dir, ".autorecon_state.json")
+    state_file = os.path.join(output_dir, ".zrecon_state.json")
     state = {}
     if os.path.exists(state_file):
         try:
@@ -905,7 +905,7 @@ def save_state(output_dir, phase, data=None):
 
 def load_state(output_dir):
     """Load saved scan state if it exists."""
-    state_file = os.path.join(output_dir, ".autorecon_state.json")
+    state_file = os.path.join(output_dir, ".zrecon_state.json")
     if os.path.exists(state_file):
         try:
             with open(state_file) as f:
@@ -919,7 +919,7 @@ def load_state(output_dir):
 
 def clear_state(output_dir):
     """Remove state file after successful scan completion."""
-    state_file = os.path.join(output_dir, ".autorecon_state.json")
+    state_file = os.path.join(output_dir, ".zrecon_state.json")
     if os.path.exists(state_file):
         os.remove(state_file)
 
@@ -961,7 +961,7 @@ def update_hosts_file(target_ip, hostnames):
 
     if confirm == 'y':
         try:
-            entry = f"\n{target_ip}  {' '.join(new_hostnames)}  # autorecon"
+            entry = f"\n{target_ip}  {' '.join(new_hostnames)}  # zrecon"
             with open('/etc/hosts', 'a') as f:
                 f.write(entry)
             log(f"Added to /etc/hosts: {target_ip}  {' '.join(new_hostnames)}", "success")
@@ -1291,7 +1291,7 @@ def phase1_port_discovery(target, output_dir):
         state = nm[host].state()
         if state == 'down':
             log(f"Host {host} appears to be down", "warn")
-            log("If the host is up but blocking ping try: python3 autorecon.py -t TARGET (nmap uses -Pn by default)", "warn")
+            log("If the host is up but blocking ping try: python3 zrecon.py -t TARGET (nmap uses -Pn by default)", "warn")
             continue
         log(f"Host: {host} ({state})", "success")
         if 'tcp' in nm[host]:
@@ -1652,7 +1652,7 @@ def check_smtp_users(target, port=25):
         log(f"  Banner: {banner}")
 
         # Send EHLO
-        sock.send(b"EHLO autorecon\r\n")
+        sock.send(b"EHLO zrecon\r\n")
         sock.recv(1024)
 
         # Try VRFY for each user
@@ -2549,7 +2549,7 @@ def generate_report(target, open_ports, services, script_results, vuln_results, 
     log("Generating Summary Report", "section")
 
     report = []
-    report.append(f"AutoRecon Summary Report")
+    report.append(f"ZRecon Summary Report")
     report.append(f"Target: {target}")
     report.append(f"Date:   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report.append(f"{'='*60}\n")
@@ -2690,7 +2690,7 @@ def main():
     banner()
 
     parser = argparse.ArgumentParser(
-        description="AutoRecon — Automated Nmap Enumeration for CPTS/HackTheBox"
+        description="ZRecon — Automated Nmap Enumeration for CPTS/HackTheBox"
     )
     parser.add_argument("-t", "--target",
         required=True,
@@ -2748,7 +2748,7 @@ def main():
     # Use target IP in folder name if user didn't specify custom output dir
     if args.output == OUTPUT_DIR:
         safe_target = args.target.replace('/', '_').replace('\\', '_')
-        output_dir = f"autorecon_{safe_target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_dir = f"zrecon_{safe_target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     else:
         output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
