@@ -90,7 +90,3 @@ autorecon_10.129.98.84_20260805_224943/
 If interrupted — re-run the same command to resume from where it left off.
 
 ---
-
-## Disclaimer
-
-For authorized penetration testing and CTF environments only.
