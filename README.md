@@ -1,6 +1,6 @@
 # ZRecon 🔍
 
-A Python reconnaissance framework that wraps Nmap with automatic service detection, targeted NSE script selection, concurrent scanning, DNS enumeration, vhost discovery, and structured output for penetration testing.
+ZRecon is a Python-based automated reconnaissance tool for penetration testing. It runs Nmap scans, selects targeted NSE scripts per service, performs DNS enumeration, vhost discovery, SMB/LDAP/SMTP enumeration, SSH credential checks, and outputs results in text and Obsidian markdown.
 
 Built for HackTheBox CPTS.
 
