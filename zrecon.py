@@ -19,6 +19,7 @@ import sys
 import json
 import subprocess
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ══════════════════════════════════════════════════════════
 #  CONFIG
@@ -1123,7 +1124,8 @@ def phase0_dns_enumeration(target, output_dir, domain=None):
     Dedicated DNS enumeration phase — runs before port scanning.
     Attempts standard record lookups, zone transfer via dig,
     and tries all discovered nameservers for AXFR.
-    Requires --domain flag or a hostname target for best results.
+    Returns (results dict, discovered_domain string).
+    Prompts user to add discovered domain to /etc/hosts.
     """
     import subprocess as sp
 
@@ -1160,11 +1162,11 @@ def phase0_dns_enumeration(target, output_dir, domain=None):
                 else:
                     log("Reverse DNS returned no result", "warn")
                     log("Use --domain DOMAIN.local to enable DNS enumeration", "warn")
-                    return {}
+                    return {}, None
             except Exception as e:
                 log(f"Reverse DNS failed: {e}", "warn")
                 log("Use --domain DOMAIN.local to enable DNS enumeration", "warn")
-                return {}
+                return {}, None
 
     log(f"Target:  {target}")
     log(f"Domain:  {domain}")
@@ -1263,7 +1265,11 @@ def phase0_dns_enumeration(target, output_dir, domain=None):
     save_output(output_dir, "00_dns_enum.txt", full_output)
     log(f"\nDNS enumeration complete — saved to 00_dns_enum.txt", "success")
 
-    return results
+    # Prompt to add discovered domain to /etc/hosts
+    if domain:
+        update_hosts_file(target, [domain])
+
+    return results, domain
 
 
 def phase1_port_discovery(target, output_dir):
@@ -2796,7 +2802,6 @@ def main():
         # ── Phase 0 + Phase 1 — DNS + Port Discovery (concurrent) ──
         if resume_phase < 1:
             log("\nRunning Phase 0 (DNS) and Phase 1 (Port Discovery) concurrently...")
-            from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=2) as executor:
                 dns_future   = None
                 ports_future = executor.submit(phase1_port_discovery, target, target_dir)
@@ -2811,7 +2816,11 @@ def main():
 
                 if dns_future:
                     try:
-                        dns_future.result()
+                        dns_result, discovered_domain = dns_future.result()
+                        # Use discovered domain for rest of scan if not already set
+                        if discovered_domain and not args.domain:
+                            args.domain = discovered_domain
+                            log(f"Domain set to: {args.domain} (from DNS enumeration)", "success")
                     except Exception as e:
                         log(f"DNS enumeration error: {e}", "warn")
 
@@ -2841,8 +2850,6 @@ def main():
             log(f"Phase 2 already complete — loaded from state", "success")
 
         # ── Phase 3 + 4 — UDP and Scripts (concurrent) ───
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
         if resume_phase < 3:
             log("\nRunning Phase 3 (UDP) and Phase 4 (Scripts) concurrently...")
             udp_results    = None
@@ -2898,11 +2905,10 @@ def main():
             else:
                 log("--vhost requires --domain to be set e.g. --domain inlanefreight.local", "warn")
 
-        # ── /etc/hosts update ─────────────────────────────
+        # /etc/hosts already updated by phase0 if domain was discovered
+        # If domain was set via --domain flag prompt here
         if args.domain and not args.sweep:
-            discovered_hostnames = [args.domain]
-            # Add any vhost findings
-            update_hosts_file(target, discovered_hostnames)
+            pass  # Already handled in phase0_dns_enumeration
 
         # ── Generate Reports ──────────────────────────────
         generate_report(
