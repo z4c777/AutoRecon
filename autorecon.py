@@ -882,6 +882,99 @@ def log(msg, level="info"):
         print(f"{CYAN}{BOLD}{'='*60}{RESET}")
 
 
+# ══════════════════════════════════════════════════════════
+#  STATE MANAGEMENT (Feature 9 — Resume interrupted scans)
+# ══════════════════════════════════════════════════════════
+def save_state(output_dir, phase, data=None):
+    """Save current scan state to JSON so interrupted scans can resume."""
+    state_file = os.path.join(output_dir, ".autorecon_state.json")
+    state = {}
+    if os.path.exists(state_file):
+        try:
+            with open(state_file) as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+    state["last_phase"]  = phase
+    state["timestamp"]   = datetime.now().isoformat()
+    if data:
+        state.update(data)
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+def load_state(output_dir):
+    """Load saved scan state if it exists."""
+    state_file = os.path.join(output_dir, ".autorecon_state.json")
+    if os.path.exists(state_file):
+        try:
+            with open(state_file) as f:
+                state = json.load(f)
+            log(f"Resuming from saved state — last completed phase: {state.get('last_phase', 'unknown')}", "warn")
+            return state
+        except Exception as e:
+            log(f"Could not load state file: {e}", "warn")
+    return {}
+
+
+def clear_state(output_dir):
+    """Remove state file after successful scan completion."""
+    state_file = os.path.join(output_dir, ".autorecon_state.json")
+    if os.path.exists(state_file):
+        os.remove(state_file)
+
+
+# ══════════════════════════════════════════════════════════
+#  /etc/hosts MANAGEMENT (Feature 7)
+# ══════════════════════════════════════════════════════════
+def update_hosts_file(target_ip, hostnames):
+    """
+    Prompt to add discovered hostnames to /etc/hosts.
+    Only adds entries that don't already exist.
+    """
+    if not hostnames:
+        return
+
+    # Filter out already existing entries
+    new_hostnames = []
+    try:
+        with open('/etc/hosts', 'r') as f:
+            existing = f.read()
+        for hostname in hostnames:
+            if hostname not in existing:
+                new_hostnames.append(hostname)
+    except Exception:
+        new_hostnames = hostnames
+
+    if not new_hostnames:
+        log("All discovered hostnames already in /etc/hosts")
+        return
+
+    log(f"\nDiscovered hostnames not in /etc/hosts:")
+    for hostname in new_hostnames:
+        log(f"  {target_ip}  {hostname}")
+
+    try:
+        confirm = input(f"\nAdd {len(new_hostnames)} hostname(s) to /etc/hosts? (y/n): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        confirm = 'n'
+
+    if confirm == 'y':
+        try:
+            entry = f"\n{target_ip}  {' '.join(new_hostnames)}  # autorecon"
+            with open('/etc/hosts', 'a') as f:
+                f.write(entry)
+            log(f"Added to /etc/hosts: {target_ip}  {' '.join(new_hostnames)}", "success")
+        except PermissionError:
+            log("Permission denied — run with sudo to update /etc/hosts", "error")
+            log(f"Manual: echo '{target_ip}  {chr(32).join(new_hostnames)}' >> /etc/hosts", "warn")
+        except Exception as e:
+            log(f"Could not update /etc/hosts: {e}", "error")
+    else:
+        log(f"Skipped — manual command:")
+        log(f"  echo '{target_ip}  {chr(32).join(new_hostnames)}' >> /etc/hosts")
+
+
 def save_output(output_dir, filename, content):
     """Save scan output to file."""
     filepath = os.path.join(output_dir, filename)
@@ -2145,6 +2238,132 @@ def phase6_vhost_discovery(target, output_dir, domain, ports=None, custom_wordli
     return results
 
 
+# ══════════════════════════════════════════════════════════
+#  MARKDOWN REPORT (Feature 4 — Obsidian compatible)
+# ══════════════════════════════════════════════════════════
+def generate_markdown_report(target, open_ports, services, script_results, vuln_results, output_dir):
+    """
+    Generate an Obsidian-compatible markdown report.
+    Follows the machine template format for CPTS.
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    md = []
+    md.append(f"# {target}")
+    md.append(f"")
+    md.append(f"## Host Info")
+    md.append(f"| Field | Value |")
+    md.append(f"|-------|-------|")
+    md.append(f"| IP Address | {target} |")
+    md.append(f"| Scan Date | {now} |")
+    md.append(f"| Status | 🔴 In Progress |")
+    md.append(f"")
+
+    # Open ports table
+    md.append(f"## Open Ports")
+    md.append(f"| Port | State | Service | Version |")
+    md.append(f"|------|-------|---------|---------|")
+    for port in open_ports:
+        svc  = services.get(port, {})
+        name = svc.get('name', 'unknown')
+        prod = svc.get('product', '')
+        ver  = svc.get('version', '')
+        version_str = f"{prod} {ver}".strip()
+        md.append(f"| {port}/tcp | open | {name} | {version_str} |")
+    md.append(f"")
+
+    # Interesting findings
+    all_findings = []
+    for port, data in script_results.items():
+        output = data.get('output', '')
+        for line in output.split('\n'):
+            if "@openssh.com" in line:
+                continue
+            if "NOT VULNERABLE" in line or "not vulnerable" in line:
+                continue
+            keywords = [
+                "VULNERABLE", "vulnerable", "CVE-",
+                "Anonymous FTP", "anonymous login", "login allowed",
+                "password:", "credential", "root:", "uid=", "id=",
+                "No auth", "WRITABLE", "READ/WRITE",
+            ]
+            if any(kw in line for kw in keywords):
+                all_findings.append(f"- `{line.strip()}`")
+
+    if all_findings:
+        md.append(f"## Interesting Findings")
+        md.extend(all_findings)
+        md.append(f"")
+
+    # Vulnerabilities
+    if vuln_results:
+        md.append(f"## Vulnerabilities")
+        for vuln in vuln_results:
+            md.append(f"- {vuln}")
+        md.append(f"")
+
+    # Enumeration notes
+    md.append(f"## Enumeration")
+    md.append(f"")
+    md.append(f"### Nmap")
+    md.append(f"```")
+    md.append(f"Output saved to: {output_dir}/02_service_detection.txt")
+    md.append(f"```")
+    md.append(f"")
+
+    # Exploitation placeholder
+    md.append(f"## Exploitation")
+    md.append(f"")
+    md.append(f"### Vulnerability")
+    md.append(f"- Type: ")
+    md.append(f"- CVE: ")
+    md.append(f"")
+    md.append(f"### Steps")
+    md.append(f"```bash")
+    md.append(f"# paste exploit command here")
+    md.append(f"```")
+    md.append(f"")
+
+    # Privilege escalation placeholder
+    md.append(f"## Privilege Escalation")
+    md.append(f"")
+    md.append(f"### Method")
+    md.append(f"")
+    md.append(f"```bash")
+    md.append(f"# paste privesc command here")
+    md.append(f"```")
+    md.append(f"")
+
+    # Flags
+    md.append(f"## Flags")
+    md.append(f"| Flag | Location | Value |")
+    md.append(f"|------|----------|-------|")
+    md.append(f"| User | | |")
+    md.append(f"| Root | | |")
+    md.append(f"")
+
+    # Credentials
+    md.append(f"## Credentials Found")
+    md.append(f"| Username | Password | Hash | Source |")
+    md.append(f"|----------|----------|------|--------|")
+    md.append(f"")
+
+    # Rabbit holes
+    md.append(f"## Rabbit Holes")
+    md.append(f"| Attempt | Why it failed |")
+    md.append(f"|---------|--------------|")
+    md.append(f"")
+
+    # Notes
+    md.append(f"## Notes")
+    md.append(f"")
+
+    report = "\n".join(md)
+    filepath = save_output(output_dir, f"{target.replace('.', '_')}_notes.md", report)
+    log(f"Markdown report saved to: {filepath}", "success")
+    return report
+
+
 def generate_report(target, open_ports, services, script_results, vuln_results, output_dir):
     """Generate a summary report of all findings."""
     log("Generating Summary Report", "section")
@@ -2396,33 +2615,85 @@ def main():
         else:
             target_dir = output_dir
 
-        # Phase 1 — Port Discovery
-        open_ports = phase1_port_discovery(target, target_dir)
+        # ── Load state for resume support ────────────────
+        state        = load_state(target_dir)
+        resume_phase = state.get("last_phase", 0)
+        if resume_phase > 0:
+            log(f"Resuming scan — skipping completed phases up to Phase {resume_phase}", "warn")
+
+        # ── Phase 1 — Port Discovery ──────────────────────
+        if resume_phase < 1:
+            open_ports = phase1_port_discovery(target, target_dir)
+            save_state(target_dir, 1, {"open_ports": open_ports})
+        else:
+            open_ports = state.get("open_ports", [])
+            log(f"Phase 1 already complete — loaded {len(open_ports)} ports from state", "success")
 
         if not open_ports:
             log(f"No open ports found on {target}", "warn")
+            clear_state(target_dir)
             continue
 
         if args.ports_only:
             log("Ports-only mode — skipping further enumeration")
+            clear_state(target_dir)
             continue
 
-        # Phase 2 — Service Detection
-        services = phase2_service_detection(target, open_ports, target_dir)
+        # ── Phase 2 — Service Detection ───────────────────
+        if resume_phase < 2:
+            services = phase2_service_detection(target, open_ports, target_dir)
+            save_state(target_dir, 2, {"services": services})
+        else:
+            services = state.get("services", {})
+            # Convert string keys back to ints (JSON serializes dict keys as strings)
+            services = {int(k): v for k, v in services.items()}
+            log(f"Phase 2 already complete — loaded from state", "success")
 
-        # Phase 3 — UDP
-        if not args.skip_udp:
-            phase3_udp_scan(target, target_dir)
+        # ── Phase 3 + 4 — UDP and Scripts (concurrent) ───
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Phase 4 — Script Enumeration
-        script_results = phase4_script_enumeration(target, open_ports, target_dir, services)
+        if resume_phase < 3:
+            log("\nRunning Phase 3 (UDP) and Phase 4 (Scripts) concurrently...")
+            udp_results    = None
+            script_results = {}
 
-        # Phase 5 — Vulnerability Scan (opt-in only)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = {}
+
+                if not args.skip_udp:
+                    futures["udp"] = executor.submit(
+                        phase3_udp_scan, target, target_dir
+                    )
+
+                futures["scripts"] = executor.submit(
+                    phase4_script_enumeration, target, open_ports, target_dir, services
+                )
+
+                for name, future in futures.items():
+                    try:
+                        result = future.result()
+                        if name == "scripts":
+                            script_results = result
+                        elif name == "udp":
+                            udp_results = result
+                    except Exception as e:
+                        log(f"Phase {name} error: {e}", "error")
+
+            save_state(target_dir, 3)
+        else:
+            log(f"Phase 3/4 already complete — loaded from state", "success")
+            script_results = {}
+
+        # ── Phase 5 — Vulnerability Scan (opt-in) ─────────
         vuln_results = []
         if args.vuln:
-            vuln_results = phase5_vuln_scan(target, open_ports, target_dir)
+            if resume_phase < 5:
+                vuln_results = phase5_vuln_scan(target, open_ports, target_dir)
+                save_state(target_dir, 5)
+            else:
+                log(f"Phase 5 already complete", "success")
 
-        # Phase 6 — Vhost Discovery
+        # ── Phase 6 — Vhost Discovery ─────────────────────
         if args.vhost:
             if args.domain:
                 http_ports = [p for p in open_ports if p in [80, 443, 8080, 8443]]
@@ -2436,7 +2707,13 @@ def main():
             else:
                 log("--vhost requires --domain to be set e.g. --domain inlanefreight.local", "warn")
 
-        # Generate Report
+        # ── /etc/hosts update ─────────────────────────────
+        if args.domain and not args.sweep:
+            discovered_hostnames = [args.domain]
+            # Add any vhost findings
+            update_hosts_file(target, discovered_hostnames)
+
+        # ── Generate Reports ──────────────────────────────
         generate_report(
             target=target,
             open_ports=open_ports,
@@ -2445,6 +2722,18 @@ def main():
             vuln_results=vuln_results,
             output_dir=target_dir
         )
+
+        generate_markdown_report(
+            target=target,
+            open_ports=open_ports,
+            services=services,
+            script_results=script_results,
+            vuln_results=vuln_results,
+            output_dir=target_dir
+        )
+
+        # ── Clear state on successful completion ──────────
+        clear_state(target_dir)
 
     log("\nAutorecon complete!", "success")
     log(f"All output saved to: {output_dir}", "success")
