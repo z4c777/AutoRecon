@@ -1,10 +1,9 @@
 # AutoRecon 🔍
 
-Automated Nmap enumeration for penetration testing. Point it at a target and it handles the rest — port discovery, service detection, targeted NSE scripts, and a clean summary report.
-
+Python wrapper script around Nmap.
 Built for HackTheBox CTFs.
 
-## Disclaimer: This tool was generated with AI.
+## Disclaimer: This tool was generated with AI
 
 ---
 
