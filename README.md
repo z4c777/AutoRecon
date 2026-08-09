@@ -1,4 +1,4 @@
-# AutoRecon 🔍
+# ZRecon 🔍
 
 A Python reconnaissance framework that wraps Nmap with automatic service detection, targeted NSE script selection, concurrent scanning, DNS enumeration, vhost discovery, and structured output for penetration testing.
 
@@ -9,7 +9,7 @@ Built for HackTheBox CPTS.
 ## Install
 
 ```bash
-git clone https://github.com/z4c777/AutoRecon && \
+git clone https://github.com/z4c777/ZRecon && \
 pip install python-nmap paramiko && \
 sudo apt install -y nmap seclists ffuf rpcbind
 ```
@@ -17,8 +17,8 @@ sudo apt install -y nmap seclists ffuf rpcbind
 ## Run
 
 ```bash
-cd AutoRecon
-python3 autorecon.py -t TARGET
+cd ZRecon
+python3 zrecon.py -t TARGET
 ```
 
 ---
@@ -26,7 +26,7 @@ python3 autorecon.py -t TARGET
 ## Usage
 
 ```bash
-python3 autorecon.py -t TARGET [options]
+python3 zrecon.py -t TARGET [options]
 ```
 
 | Flag | Description |
@@ -46,16 +46,16 @@ python3 autorecon.py -t TARGET [options]
 
 ```bash
 # Basic scan
-python3 autorecon.py -t 10.129.98.84
+python3 zrecon.py -t 10.129.98.84
 
 # With DNS enumeration and vhost discovery
-python3 autorecon.py -t 10.129.98.84 --domain inlanefreight.local --vhost
+python3 zrecon.py -t 10.129.98.84 --domain inlanefreight.local --vhost
 
 # Subnet sweep
-python3 autorecon.py -t 10.129.1.0/24 --sweep
+python3 zrecon.py -t 10.129.1.0/24 --sweep
 
 # Full scan with vuln check
-python3 autorecon.py -t 10.129.98.84 --domain inlanefreight.local --vhost --vuln
+python3 zrecon.py -t 10.129.98.84 --domain inlanefreight.local --vhost --vuln
 ```
 
 ---
@@ -82,7 +82,7 @@ Beyond NSE scripts the tool runs active checks automatically:
 ## Output
 
 ```
-autorecon_10.129.98.84_20260805_224943/
+zrecon_10.129.98.84_20260805_224943/
 ├── 00_summary_report.txt     All findings
 ├── 10_129_98_84_notes.md     Obsidian-ready notes
 ├── 00_dns_enum.txt           DNS records
