@@ -4,7 +4,7 @@ Automated Nmap enumeration for penetration testing. Point it at a target and it 
 
 Built for HackTheBox CTFs.
 
-# Disclaimer: This tool was generated with AI.
+## Disclaimer: This tool was generated with AI.
 
 ---
 
