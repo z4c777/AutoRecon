@@ -1921,22 +1921,39 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
             if any(kw in line for kw in keywords):
                 log(f"  [INTERESTING] {line.strip()}", "warn")
 
-        # Post-scan tips and default cred checks for all TCP services
+        # Post-scan tips for all TCP services
         for port in tcp_ports:
             svc_name = port_svc_map.get(port, {}).get("name", "")
             post_scan_tips(port, svc_name, target)
 
-            # SSH default credential check
+        # ── Active checks — run concurrently ─────────────
+        active_tasks = []
+        for port in tcp_ports:
+            svc_name = port_svc_map.get(port, {}).get("name", "")
             if svc_name == "SSH" or port == 22:
-                check_ssh_default_creds(target, port)
-
-            # SMTP user enumeration via VRFY
+                active_tasks.append(("ssh_creds",  port, svc_name))
             if svc_name == "SMTP" or port in [25, 465, 587]:
-                check_smtp_users(target, port)
-
-            # RPC — run rpcinfo binary directly
+                active_tasks.append(("smtp_vrfy",  port, svc_name))
             if svc_name in ["RPC", "rpcbind"] or port == 111:
-                run_rpcinfo(target, port, output_dir)
+                active_tasks.append(("rpcinfo",    port, svc_name))
+
+        if active_tasks:
+            log(f"\nRunning {len(active_tasks)} active check(s) concurrently...")
+            with ThreadPoolExecutor(max_workers=len(active_tasks)) as executor:
+                futures = []
+                for task_type, port, svc_name in active_tasks:
+                    if task_type == "ssh_creds":
+                        futures.append(executor.submit(check_ssh_default_creds, target, port))
+                    elif task_type == "smtp_vrfy":
+                        futures.append(executor.submit(check_smtp_users, target, port))
+                    elif task_type == "rpcinfo":
+                        futures.append(executor.submit(run_rpcinfo, target, port, output_dir))
+
+                for future in futures:
+                    try:
+                        future.result()
+                    except Exception as e:
+                        log(f"Active check error: {e}", "warn")
 
     # ── Run UDP scripts separately ────────────────────────
     if udp_ports and udp_scripts:
@@ -2576,14 +2593,6 @@ def main():
 
     targets = [args.target]
 
-    # Phase 0 — DNS Enumeration (runs before port scan)
-    if args.domain or (not args.sweep and '/' not in args.target):
-        phase0_dns_enumeration(
-            target=args.target,
-            output_dir=output_dir,
-            domain=args.domain
-        )
-
     # Reachability check — skip for subnets (sweep handles that)
     if '/' not in args.target:
         log(f"Checking if target is reachable...")
@@ -2621,13 +2630,32 @@ def main():
         if resume_phase > 0:
             log(f"Resuming scan — skipping completed phases up to Phase {resume_phase}", "warn")
 
-        # ── Phase 1 — Port Discovery ──────────────────────
+        # ── Phase 0 + Phase 1 — DNS + Port Discovery (concurrent) ──
         if resume_phase < 1:
-            open_ports = phase1_port_discovery(target, target_dir)
+            log("\nRunning Phase 0 (DNS) and Phase 1 (Port Discovery) concurrently...")
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                dns_future   = None
+                ports_future = executor.submit(phase1_port_discovery, target, target_dir)
+
+                if args.domain or (not args.sweep and '/' not in args.target):
+                    dns_future = executor.submit(
+                        phase0_dns_enumeration,
+                        target, target_dir, args.domain
+                    )
+
+                open_ports = ports_future.result()
+
+                if dns_future:
+                    try:
+                        dns_future.result()
+                    except Exception as e:
+                        log(f"DNS enumeration error: {e}", "warn")
+
             save_state(target_dir, 1, {"open_ports": open_ports})
         else:
             open_ports = state.get("open_ports", [])
-            log(f"Phase 1 already complete — loaded {len(open_ports)} ports from state", "success")
+            log(f"Phase 0/1 already complete — loaded {len(open_ports)} ports from state", "success")
 
         if not open_ports:
             log(f"No open ports found on {target}", "warn")
