@@ -9,10 +9,16 @@ Built for HackTheBox CPTS.
 ## Install
 
 ```bash
-git clone https://github.com/z4c777/AutoRecon
+git clone https://github.com/z4c777/AutoRecon && \
+pip install python-nmap paramiko && \
+sudo apt install -y nmap seclists ffuf rpcbind
+```
+
+## Run
+
+```bash
 cd AutoRecon
-pip install python-nmap paramiko
-sudo apt install nmap seclists ffuf rpcbind
+python3 autorecon.py -t TARGET
 ```
 
 ---
@@ -90,3 +96,7 @@ autorecon_10.129.98.84_20260805_224943/
 If interrupted — re-run the same command to resume from where it left off.
 
 ---
+
+## Disclaimer
+
+For authorized penetration testing and CTF environments only.
