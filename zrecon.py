@@ -1147,7 +1147,7 @@ def phase0_dns_enumeration(target, output_dir, domain=None):
             domain = ".".join(parts[-2:]) if len(parts) >= 2 else target
             log(f"Derived domain from target: {domain}")
         else:
-            # Try reverse DNS to find domain
+            # Step 1 — Try reverse DNS
             log("No domain provided — attempting reverse DNS lookup...")
             try:
                 rev = sp.run(
@@ -1161,12 +1161,76 @@ def phase0_dns_enumeration(target, output_dir, domain=None):
                     log(f"Derived domain from reverse DNS: {domain}")
                 else:
                     log("Reverse DNS returned no result", "warn")
-                    log("Use --domain DOMAIN.local to enable DNS enumeration", "warn")
-                    return {}, None
             except Exception as e:
                 log(f"Reverse DNS failed: {e}", "warn")
-                log("Use --domain DOMAIN.local to enable DNS enumeration", "warn")
-                return {}, None
+
+            # Step 2 — Query target DNS server directly for SOA/NS records
+            if not domain:
+                log(f"Querying target DNS server {target} directly...")
+                discovered = None
+
+                # Try SOA on common internal TLDs
+                common_tlds = ["local", "lan", "internal", "corp", "htb", "inlanefreight.local"]
+                for tld in common_tlds:
+                    try:
+                        result = sp.run(
+                            ["dig", "SOA", tld, f"@{target}", "+short", "+time=3", "+tries=1"],
+                            capture_output=True, text=True, timeout=8
+                        )
+                        if result.stdout.strip():
+                            discovered = tld
+                            log(f"Found domain via SOA query: {tld}", "success")
+                            break
+                    except Exception:
+                        continue
+
+                # Try NS record for root
+                if not discovered:
+                    try:
+                        result = sp.run(
+                            ["dig", "NS", ".", f"@{target}", "+short", "+time=3", "+tries=1"],
+                            capture_output=True, text=True, timeout=8
+                        )
+                        if result.stdout.strip():
+                            for line in result.stdout.strip().split("\n"):
+                                ns = line.strip().rstrip(".")
+                                if ns and "." in ns:
+                                    parts = ns.split(".")
+                                    discovered = ".".join(parts[-2:])
+                                    log(f"Found domain via NS root query: {discovered}", "success")
+                                    break
+                    except Exception:
+                        pass
+
+                # Try version.bind and hostname.bind
+                if not discovered:
+                    for query in ["hostname.bind", "version.bind"]:
+                        try:
+                            result = sp.run(
+                                ["dig", "TXT", query, "CHAOS", f"@{target}", "+short"],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            if result.stdout.strip():
+                                log(f"DNS server info: {result.stdout.strip()}")
+                        except Exception:
+                            pass
+
+                if discovered:
+                    domain = discovered
+                else:
+                    # Step 3 — Prompt user
+                    log("Could not auto-discover domain from DNS server", "warn")
+                    try:
+                        user_input = input(f"\n[?] Enter domain name for DNS enumeration (e.g. inlanefreight.local) or press Enter to skip: ").strip()
+                        if user_input:
+                            domain = user_input
+                            log(f"Domain set to: {domain}", "success")
+                        else:
+                            log("No domain provided — skipping DNS enumeration", "warn")
+                            return {}, None
+                    except (EOFError, KeyboardInterrupt):
+                        log("Skipping DNS enumeration", "warn")
+                        return {}, None
 
     log(f"Target:  {target}")
     log(f"Domain:  {domain}")
@@ -2838,6 +2902,21 @@ def main():
             log("Ports-only mode — skipping further enumeration")
             clear_state(target_dir)
             continue
+
+        # ── If port 53 found and no domain set yet — retry Phase 0 ──
+        if 53 in open_ports and not args.domain:
+            log("\nPort 53 open — retrying DNS enumeration against target DNS server...")
+            try:
+                dns_result, discovered_domain = phase0_dns_enumeration(
+                    target=target,
+                    output_dir=target_dir,
+                    domain=None
+                )
+                if discovered_domain:
+                    args.domain = discovered_domain
+                    log(f"Domain discovered: {args.domain}", "success")
+            except Exception as e:
+                log(f"DNS retry error: {e}", "warn")
 
         # ── Phase 2 — Service Detection ───────────────────
         if resume_phase < 2:
