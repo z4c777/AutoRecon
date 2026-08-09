@@ -1406,6 +1406,157 @@ def phase3_udp_scan(target, output_dir):
 # ══════════════════════════════════════════════════════════
 #  RPCINFO EXECUTION
 # ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+#  SMB NULL SESSION / GUEST ENUMERATION
+# ══════════════════════════════════════════════════════════
+def check_smb_null_session(target, port, output_dir):
+    """
+    Try SMB null session and guest login to enumerate shares.
+    Uses smbclient and crackmapexec if available.
+    """
+    import subprocess as sp
+    import shutil
+
+    log(f"\n[Port {port}] Checking SMB null session and guest access...")
+
+    results = []
+
+    # ── smbclient share listing ───────────────────────────
+    if shutil.which("smbclient"):
+        for user, label in [("", "null session"), ("guest", "guest")]:
+            try:
+                cmd = ["smbclient", "-L", f"//{target}", "-N"] if not user else                       ["smbclient", "-L", f"//{target}", "-U", "guest%"]
+                result = sp.run(cmd, capture_output=True, text=True, timeout=15)
+                output = result.stdout + result.stderr
+
+                if "Sharename" in output or "ADMIN$" in output or "IPC$" in output:
+                    log(f"  [✓] smbclient {label} — shares found:", "success")
+                    for line in output.split("\n"):
+                        if line.strip() and not line.startswith("session") and not line.startswith("Reconnecting"):
+                            log(f"      {line}")
+                    results.append(f"smbclient {label}: {output}")
+                elif "NT_STATUS_ACCESS_DENIED" in output:
+                    log(f"  [-] smbclient {label} — access denied")
+                elif "NT_STATUS_LOGON_FAILURE" in output:
+                    log(f"  [-] smbclient {label} — login failed")
+                else:
+                    log(f"  [-] smbclient {label} — no shares")
+
+            except sp.TimeoutExpired:
+                log(f"  smbclient {label} timed out", "warn")
+            except Exception as e:
+                log(f"  smbclient error: {e}", "warn")
+    else:
+        log("  smbclient not found — install with: sudo apt install smbclient", "warn")
+
+    if results:
+        # Save output
+        save_output(output_dir, f"04_{port}_smb_null.txt", "\n".join(results))
+        log(f"  Saved to: 04_{port}_smb_null.txt", "success")
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════
+#  LDAP ANONYMOUS BIND ENUMERATION
+# ══════════════════════════════════════════════════════════
+def check_ldap_anonymous(target, port, output_dir, domain=None):
+    """
+    Attempt LDAP anonymous bind to enumerate directory info.
+    Tries to extract naming contexts and base DN entries.
+    """
+    import subprocess as sp
+    import shutil
+
+    log(f"\n[Port {port}] Attempting LDAP anonymous bind...")
+
+    if not shutil.which("ldapsearch"):
+        log("  ldapsearch not found — install with: sudo apt install ldap-utils", "warn")
+        log(f"  Manual: ldapsearch -x -H ldap://{target} -b '' -s base namingContexts", "warn")
+        return []
+
+    proto  = "ldaps" if port in [636, 3269] else "ldap"
+    uri    = f"{proto}://{target}:{port}"
+    results = []
+
+    # ── Step 1: Get naming contexts ───────────────────────
+    log(f"  Getting naming contexts from {uri}...")
+    try:
+        result = sp.run(
+            ["ldapsearch", "-x", "-H", uri, "-b", "", "-s", "base", "namingContexts"],
+            capture_output=True, text=True, timeout=15
+        )
+        output = result.stdout
+
+        naming_contexts = []
+        for line in output.split("\n"):
+            if "namingContexts:" in line:
+                nc = line.split("namingContexts:")[-1].strip()
+                naming_contexts.append(nc)
+                log(f"  [✓] Naming context: {nc}", "success")
+
+        results.append(f"[Naming Contexts]\n{output}")
+
+        if not naming_contexts and domain:
+            # Derive base DN from domain
+            parts = domain.split(".")
+            naming_contexts = ["dc=" + ",dc=".join(parts)]
+            log(f"  Derived base DN: {naming_contexts[0]}")
+
+    except sp.TimeoutExpired:
+        log(f"  LDAP naming context lookup timed out", "warn")
+        return []
+    except Exception as e:
+        log(f"  LDAP error: {e}", "warn")
+        return []
+
+    # ── Step 2: Enumerate base DN ─────────────────────────
+    for base_dn in naming_contexts:
+        log(f"  Enumerating base DN: {base_dn}...")
+        try:
+            result = sp.run(
+                ["ldapsearch", "-x", "-H", uri, "-b", base_dn],
+                capture_output=True, text=True, timeout=30
+            )
+            output = result.stdout
+
+            if "result: 0 Success" in output or "numEntries" in output:
+                # Count entries
+                entries = output.count("dn:")
+                log(f"  [✓] Anonymous bind successful — {entries} entries found", "success")
+                results.append(f"[Base DN: {base_dn}]\n{output}")
+
+                # Extract useful info
+                users     = [l.split(":")[-1].strip() for l in output.split("\n") if "sAMAccountName:" in l]
+                groups    = [l.split(":")[-1].strip() for l in output.split("\n") if "cn:" in l and "group" in l.lower()]
+                desc      = [l.split(":")[-1].strip() for l in output.split("\n") if "description:" in l]
+
+                if users:
+                    log(f"  [!] Users found: {users}", "warn")
+                if groups:
+                    log(f"  [!] Groups found: {groups[:5]}", "warn")
+                if desc:
+                    log(f"  [!] Descriptions (may contain passwords): {desc[:3]}", "warn")
+
+                # Save full output
+                save_output(output_dir, f"04_{port}_ldap_anonymous.txt", "\n".join(results))
+                log(f"  Saved to: 04_{port}_ldap_anonymous.txt", "success")
+
+            elif "Insufficient access" in output or "result: 50" in output:
+                log(f"  [-] Anonymous bind refused — server requires authentication")
+            elif "result: 32" in output:
+                log(f"  [-] Base DN not found: {base_dn}")
+            else:
+                log(f"  [-] No results for {base_dn}")
+
+        except sp.TimeoutExpired:
+            log(f"  LDAP enumeration timed out for {base_dn}", "warn")
+        except Exception as e:
+            log(f"  LDAP enumeration error: {e}", "warn")
+
+    return results
+
+
 def run_rpcinfo(target, port, output_dir):
     """
     Run rpcinfo binary against target when RPC port 111 is found.
@@ -1746,6 +1897,10 @@ def post_scan_tips(port, svc_name, target):
             f"      snmpwalk -v2c -c public {target}",
             f"      snmpwalk -v2c -c private {target}",
             f"      onesixtyone -c /usr/share/seclists/Discovery/SNMP/snmp.txt {target}",
+            f"      # If valid string found — full walk:",
+            f"      snmpwalk -v2c -c COMMUNITY {target}",
+            f"      snmpwalk -v2c -c COMMUNITY {target} 1.3.6.1.2.1.25.4.2.1.2  (running processes)",
+            f"      snmpwalk -v2c -c COMMUNITY {target} 1.3.6.1.2.1.25.6.3.1.2  (installed software)",
         ],
         # MySQL
         "MySQL": [
@@ -1936,10 +2091,14 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
                 active_tasks.append(("smtp_vrfy",  port, svc_name))
             if svc_name in ["RPC", "rpcbind"] or port == 111:
                 active_tasks.append(("rpcinfo",    port, svc_name))
+            if svc_name in ["SMB", "SMB-NetBIOS", "microsoft-ds", "netbios-ssn"] or port in [139, 445]:
+                active_tasks.append(("smb_null",   port, svc_name))
+            if svc_name in ["LDAP", "LDAPS", "Global-Catalog", "Global-Catalog-SSL"] or port in [389, 636, 3268, 3269]:
+                active_tasks.append(("ldap_anon",  port, svc_name))
 
         if active_tasks:
             log(f"\nRunning {len(active_tasks)} active check(s) concurrently...")
-            with ThreadPoolExecutor(max_workers=len(active_tasks)) as executor:
+            with ThreadPoolExecutor(max_workers=max(len(active_tasks), 1)) as executor:
                 futures = []
                 for task_type, port, svc_name in active_tasks:
                     if task_type == "ssh_creds":
@@ -1948,6 +2107,10 @@ def phase4_script_enumeration(target, open_ports, output_dir, services=None):
                         futures.append(executor.submit(check_smtp_users, target, port))
                     elif task_type == "rpcinfo":
                         futures.append(executor.submit(run_rpcinfo, target, port, output_dir))
+                    elif task_type == "smb_null":
+                        futures.append(executor.submit(check_smb_null_session, target, port, output_dir))
+                    elif task_type == "ldap_anon":
+                        futures.append(executor.submit(check_ldap_anonymous, target, port, output_dir, args.domain))
 
                 for future in futures:
                     try:
